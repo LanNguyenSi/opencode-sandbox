@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify shell scripts
+        run: bash -n ./opencode-sandbox && bash -n ./install.sh && bash -n ./tests/smoke.sh
+
+      - name: Run smoke tests
+        run: make test
+
+      - name: Validate docker compose config
+        run: docker compose config >/dev/null

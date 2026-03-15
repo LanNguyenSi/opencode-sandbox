@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+IMAGE="${OPENCODE_IMAGE:-ghcr.io/anomalyco/opencode:latest}"
+OFFLINE=false
+PRINT_ONLY=false
+INIT_STRUCTURE=false
+
+usage() {
+  cat <<'USAGE'
+Usage: opencode-sandbox [wrapper-options] [--] [opencode-args...]
+
+Wrapper options:
+  --offline           Disable container networking
+  --print             Print the docker command and exit without changing the workspace
+  --init-structure    Create tasks/, context/, tmp/, outputs/ in workspace
+  --help              Show this help
+
+Examples:
+  opencode-sandbox
+  opencode-sandbox auth login
+  opencode-sandbox run "Summarize this workspace"
+  opencode-sandbox --offline -- run "Summarize this workspace"
+  opencode-sandbox --init-structure
+USAGE
+}
+
+OPENCODE_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --offline) OFFLINE=true; shift ;;
+    --print) PRINT_ONLY=true; shift ;;
+    --init-structure) INIT_STRUCTURE=true; shift ;;
+    --help|-h) usage; exit 0 ;;
+    --) shift; OPENCODE_ARGS+=("$@"); break ;;
+    *) OPENCODE_ARGS+=("$1"); shift ;;
+  esac
+done
+
+if command -v git >/dev/null 2>&1 && git rev-parse --show-toplevel >/dev/null 2>&1; then
+  WORKDIR="$(git rev-parse --show-toplevel)"
+else
+  WORKDIR="$(pwd)"
+  echo "[opencode-sandbox][warn] No Git repository detected. Using current directory as workspace: $WORKDIR" >&2
+fi
+
+HOST_OPENCODE_HOME="$HOME/.opencode-home"
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "[opencode-sandbox][error] Docker is not installed or not available in PATH." >&2
+  exit 1
+fi
+
+if [[ ! -f "$WORKDIR/AGENTS.md" ]]; then
+  echo "[opencode-sandbox][warn] AGENTS.md not found in workspace root." >&2
+fi
+if [[ ! -f "$WORKDIR/PROJECT.md" ]]; then
+  echo "[opencode-sandbox][warn] PROJECT.md not found in workspace root." >&2
+fi
+
+CONTAINER_NAME_SUFFIX="$(basename "$WORKDIR" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9_.-' '-')"
+CONTAINER_NAME_SUFFIX="${CONTAINER_NAME_SUFFIX#-}"
+CONTAINER_NAME_SUFFIX="${CONTAINER_NAME_SUFFIX%-}"
+
+if [[ -z "$CONTAINER_NAME_SUFFIX" ]]; then
+  CONTAINER_NAME_SUFFIX="workspace"
+fi
+
+DOCKER_ARGS=(run -it --rm --name "opencode-$CONTAINER_NAME_SUFFIX")
+
+if [[ "$OFFLINE" == true ]]; then
+  DOCKER_ARGS+=(--network none)
+fi
+
+DOCKER_ARGS+=(
+  -v "$WORKDIR:/workspace"
+  -v "$HOST_OPENCODE_HOME:/opencode-home"
+  -w /workspace
+  -e HOME=/opencode-home
+  -e TERM="${TERM:-xterm-256color}"
+  "$IMAGE"
+)
+
+if [[ ${#OPENCODE_ARGS[@]} -gt 0 ]]; then
+  DOCKER_ARGS+=("${OPENCODE_ARGS[@]}")
+fi
+
+if [[ "$PRINT_ONLY" == true ]]; then
+  printf '%q ' docker "${DOCKER_ARGS[@]}"
+  printf '\n'
+  exit 0
+fi
+
+if [[ "$INIT_STRUCTURE" == true ]]; then
+  mkdir -p "$WORKDIR/tasks" "$WORKDIR/context" "$WORKDIR/tmp" "$WORKDIR/outputs"
+fi
+
+mkdir -p "$HOST_OPENCODE_HOME"
+
+exec docker "${DOCKER_ARGS[@]}"

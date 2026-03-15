@@ -1,0 +1,6 @@
+.opencode-home/
+workspace/
+tmp/
+context/
+outputs/
+.DS_Store

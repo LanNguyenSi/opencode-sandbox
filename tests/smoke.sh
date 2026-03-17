@@ -8,6 +8,7 @@ trap 'rm -rf "$TEST_TMP"' EXIT
 TEST_WORKDIR="$TEST_TMP/workspace"
 FAKE_BIN="$TEST_TMP/fake-bin"
 TEST_HOME="$TEST_TMP/home"
+DOCKER_LOG="$TEST_TMP/docker.log"
 
 mkdir -p "$TEST_WORKDIR" "$FAKE_BIN" "$TEST_HOME"
 cp "$ROOT_DIR/opencode-sandbox" "$TEST_WORKDIR/opencode-sandbox"
@@ -15,6 +16,7 @@ cp "$ROOT_DIR/PROJECT.md" "$TEST_WORKDIR/PROJECT.md"
 
 cat > "$FAKE_BIN/docker" <<'EOF'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >> "$DOCKER_LOG"
 exit 0
 EOF
 chmod +x "$FAKE_BIN/docker" "$TEST_WORKDIR/opencode-sandbox"
@@ -22,7 +24,7 @@ chmod +x "$FAKE_BIN/docker" "$TEST_WORKDIR/opencode-sandbox"
 run_wrapper() {
   (
     cd "$TEST_WORKDIR"
-    HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" bash ./opencode-sandbox "$@"
+    HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" DOCKER_LOG="$DOCKER_LOG" bash ./opencode-sandbox "$@"
   )
 }
 
@@ -75,6 +77,16 @@ assert_not_exists "$TEST_WORKDIR/outputs"
 offline_output="$(run_wrapper --offline --print 2>&1)"
 assert_contains "$offline_output" "--network none"
 
+pull_print_output="$(run_wrapper --pull --print 2>&1)"
+assert_contains "$pull_print_output" "docker pull ghcr.io/anomalyco/opencode:latest"
+assert_contains "$pull_print_output" "docker run -it --rm --name opencode-workspace"
+
+if run_wrapper --pull --offline >/tmp/opencode-sandbox-smoke.out 2>/tmp/opencode-sandbox-smoke.err; then
+  printf 'Expected --pull --offline to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(cat /tmp/opencode-sandbox-smoke.err)" "--pull cannot be combined with --offline."
+
 space_dir="$TEST_TMP/Space Dir"
 mkdir -p "$space_dir"
 cp "$ROOT_DIR/opencode-sandbox" "$space_dir/opencode-sandbox"
@@ -99,5 +111,14 @@ assert_exists "$TEST_WORKDIR/context"
 assert_exists "$TEST_WORKDIR/tmp"
 assert_exists "$TEST_WORKDIR/outputs"
 assert_exists "$TEST_HOME/.opencode-home"
+
+: > "$DOCKER_LOG"
+run_wrapper --pull >/dev/null 2>&1 || {
+  printf 'Expected --pull run to succeed\n' >&2
+  exit 1
+}
+docker_log_contents="$(cat "$DOCKER_LOG")"
+assert_contains "$docker_log_contents" "pull ghcr.io/anomalyco/opencode:latest"
+assert_contains "$docker_log_contents" "run -it --rm --name opencode-workspace"
 
 printf 'smoke tests: ok\n'

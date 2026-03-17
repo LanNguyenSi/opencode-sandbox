@@ -5,6 +5,7 @@ IMAGE="${OPENCODE_IMAGE:-ghcr.io/anomalyco/opencode:latest}"
 OFFLINE=false
 PRINT_ONLY=false
 INIT_STRUCTURE=false
+PULL_IMAGE=false
 
 usage() {
   cat <<'USAGE'
@@ -12,12 +13,14 @@ Usage: opencode-sandbox [wrapper-options] [--] [opencode-args...]
 
 Wrapper options:
   --offline           Disable container networking
+  --pull              Pull the configured image before starting
   --print             Print the docker command and exit without changing the workspace
   --init-structure    Create tasks/, context/, tmp/, outputs/ in workspace
   --help              Show this help
 
 Examples:
   opencode-sandbox
+  opencode-sandbox --pull
   opencode-sandbox auth login
   opencode-sandbox run "Summarize this workspace"
   opencode-sandbox --offline -- run "Summarize this workspace"
@@ -29,6 +32,7 @@ OPENCODE_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --offline) OFFLINE=true; shift ;;
+    --pull) PULL_IMAGE=true; shift ;;
     --print) PRINT_ONLY=true; shift ;;
     --init-structure) INIT_STRUCTURE=true; shift ;;
     --help|-h) usage; exit 0 ;;
@@ -48,6 +52,11 @@ HOST_OPENCODE_HOME="$HOME/.opencode-home"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "[opencode-sandbox][error] Docker is not installed or not available in PATH." >&2
+  exit 1
+fi
+
+if [[ "$OFFLINE" == true && "$PULL_IMAGE" == true ]]; then
+  echo "[opencode-sandbox][error] --pull cannot be combined with --offline." >&2
   exit 1
 fi
 
@@ -86,6 +95,10 @@ if [[ ${#OPENCODE_ARGS[@]} -gt 0 ]]; then
 fi
 
 if [[ "$PRINT_ONLY" == true ]]; then
+  if [[ "$PULL_IMAGE" == true ]]; then
+    printf '%q ' docker pull "$IMAGE"
+    printf '\n'
+  fi
   printf '%q ' docker "${DOCKER_ARGS[@]}"
   printf '\n'
   exit 0
@@ -96,5 +109,9 @@ if [[ "$INIT_STRUCTURE" == true ]]; then
 fi
 
 mkdir -p "$HOST_OPENCODE_HOME"
+
+if [[ "$PULL_IMAGE" == true ]]; then
+  docker pull "$IMAGE"
+fi
 
 exec docker "${DOCKER_ARGS[@]}"

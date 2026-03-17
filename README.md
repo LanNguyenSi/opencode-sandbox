@@ -59,6 +59,7 @@ opencode-sandbox /init
 
 ```bash
 opencode-sandbox --print
+opencode-sandbox --pull
 opencode-sandbox --offline -- run "Summarize this workspace"
 opencode-sandbox --init-structure
 ```
@@ -70,6 +71,7 @@ opencode-sandbox --init-structure
 - mounts that directory as the container `HOME`
 - passes unknown arguments directly to OpenCode
 - automatically uses the Git repository root when applicable
+- updates the image only when `--pull` is requested
 - supports overriding the image with `OPENCODE_IMAGE=...`
 
 ## Important note about `.opencode-home`
@@ -101,6 +103,8 @@ Suggested roles:
 
 `--print` is a real dry-run mode. It prints the generated Docker command and exits without creating `~/.opencode-home` or any optional workspace directories.
 
+If `--pull` is also set, `--print` prints the `docker pull` command first and still exits without changing anything.
+
 ## Image selection
 
 By default, the wrapper uses `ghcr.io/anomalyco/opencode:latest`.
@@ -110,6 +114,14 @@ If you want a pinned or custom image, override it explicitly:
 ```bash
 OPENCODE_IMAGE=ghcr.io/anomalyco/opencode:<tag> opencode-sandbox
 ```
+
+If you want to refresh the configured image before launching OpenCode, use:
+
+```bash
+opencode-sandbox --pull
+```
+
+`--pull` pulls exactly the image selected by `OPENCODE_IMAGE` or the default image. It cannot be combined with `--offline`.
 
 ## docker-compose.yml
 

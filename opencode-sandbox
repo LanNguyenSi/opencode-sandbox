@@ -75,7 +75,13 @@ if [[ -z "$CONTAINER_NAME_SUFFIX" ]]; then
   CONTAINER_NAME_SUFFIX="workspace"
 fi
 
-DOCKER_ARGS=(run -it --rm --name "opencode-$CONTAINER_NAME_SUFFIX")
+DOCKER_ARGS=(run --rm -i)
+
+if [[ -t 0 && -t 1 ]]; then
+  DOCKER_ARGS+=(-t)
+fi
+
+DOCKER_ARGS+=(--name "opencode-$CONTAINER_NAME_SUFFIX")
 
 if [[ "$OFFLINE" == true ]]; then
   DOCKER_ARGS+=(--network none)

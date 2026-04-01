@@ -27,10 +27,17 @@ Git is not required. If the current directory is not a Git repository, the wrapp
 ```bash
 chmod +x ./install.sh ./opencode-sandbox
 ./install.sh
-source ~/.bashrc
 ```
 
-If you do not use Bash, reload the shell file reported by `install.sh`.
+The installer copies `opencode-sandbox` to `~/.local/bin` and does not edit shell startup files unless you ask it to.
+
+If `~/.local/bin` is not already in `PATH`, either add it yourself or let the installer update the detected shell file:
+
+```bash
+./install.sh --add-path
+```
+
+Then reload the shell file reported by `install.sh`.
 
 ## Quick checks
 

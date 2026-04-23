@@ -76,11 +76,43 @@ assert_exists() {
 print_output="$(run_wrapper --print 2>&1)"
 assert_contains "$print_output" "docker run --rm -i --name opencode-workspace"
 assert_contains "$print_output" "ghcr.io/anomalyco/opencode:latest"
-assert_contains "$print_output" "-v $TEST_HOME/.opencode-home:/opencode-home"
+# Per-workspace home: the basename slug ("workspace" fallback here) is appended.
+assert_contains "$print_output" "-v $TEST_HOME/.opencode-home/workspace:/opencode-home"
 assert_contains "$print_output" "-e HOME=/opencode-home"
 assert_contains "$print_output" "[opencode-sandbox][warn] No Git repository detected."
 assert_contains "$print_output" "[opencode-sandbox][warn] AGENTS.md not found in workspace root."
 assert_not_contains "$print_output" " -t "
+
+# --version prints the version string and exits without invoking docker.
+: > "$DOCKER_LOG"
+version_output="$(run_wrapper --version 2>&1)"
+assert_contains "$version_output" "opencode-sandbox 0.1.0"
+if [[ -s "$DOCKER_LOG" ]]; then
+  printf 'Expected --version not to invoke docker, but docker was called:\n%s\n' \
+    "$(cat "$DOCKER_LOG")" >&2
+  exit 1
+fi
+
+# Legacy-layout detection: a pre-v0.1.0 shared ~/.opencode-home/ with files
+# directly inside triggers a one-line warn. The new run still works.
+legacy_home="$TEST_TMP/legacy-home"
+mkdir -p "$legacy_home/.opencode-home"
+echo "fake-auth" > "$legacy_home/.opencode-home/auth.json"
+legacy_output="$(
+  cd "$TEST_WORKDIR"
+  HOME="$legacy_home" PATH="$FAKE_BIN:$PATH" bash ./opencode-sandbox --print 2>&1
+)"
+assert_contains "$legacy_output" "Legacy ~/.opencode-home/ state detected"
+assert_contains "$legacy_output" "$legacy_home/.opencode-home/workspace:/opencode-home"
+
+# Same workspace with the new per-slug sub-dir already present → no legacy warn.
+clean_home="$TEST_TMP/clean-home"
+mkdir -p "$clean_home/.opencode-home/workspace"
+clean_output="$(
+  cd "$TEST_WORKDIR"
+  HOME="$clean_home" PATH="$FAKE_BIN:$PATH" bash ./opencode-sandbox --print 2>&1
+)"
+assert_not_contains "$clean_output" "Legacy ~/.opencode-home/ state detected"
 
 init_print_output="$(run_wrapper --init-structure --print 2>&1)"
 assert_contains "$init_print_output" "docker run --rm -i --name opencode-workspace"
@@ -206,6 +238,38 @@ install_add_path_output="$(
   HOME="$INSTALL_TEST_HOME" PATH="/usr/bin:/bin" SHELL="/bin/bash" bash ./install.sh --add-path 2>&1
 )"
 assert_contains "$install_add_path_output" "Added PATH entry to $INSTALL_TEST_HOME/.bashrc"
+# shellcheck disable=SC2016  # literal; the rc file expands $HOME at shell startup
 assert_contains "$(cat "$INSTALL_TEST_HOME/.bashrc")" 'export PATH="$HOME/.local/bin:$PATH"'
+
+# --uninstall removes the installed binary, leaves state alone.
+assert_exists "$INSTALL_TEST_HOME/.local/bin/opencode-sandbox"
+mkdir -p "$INSTALL_TEST_HOME/.opencode-home/some-workspace"
+echo "preserved" > "$INSTALL_TEST_HOME/.opencode-home/some-workspace/marker"
+uninstall_output="$(
+  cd "$INSTALL_TEST_DIR"
+  HOME="$INSTALL_TEST_HOME" PATH="/usr/bin:/bin" SHELL="/bin/bash" bash ./install.sh --uninstall 2>&1
+)"
+assert_contains "$uninstall_output" "Removed: $INSTALL_TEST_HOME/.local/bin/opencode-sandbox"
+assert_contains "$uninstall_output" "State dir $INSTALL_TEST_HOME/.opencode-home left in place"
+assert_not_exists "$INSTALL_TEST_HOME/.local/bin/opencode-sandbox"
+assert_exists "$INSTALL_TEST_HOME/.opencode-home/some-workspace/marker"
+
+# --uninstall is idempotent — re-running is a no-op with a friendly message.
+uninstall_again="$(
+  cd "$INSTALL_TEST_DIR"
+  HOME="$INSTALL_TEST_HOME" PATH="/usr/bin:/bin" SHELL="/bin/bash" bash ./install.sh --uninstall 2>&1
+)"
+assert_contains "$uninstall_again" "Nothing to remove at: $INSTALL_TEST_HOME/.local/bin/opencode-sandbox"
+
+# --uninstall rejects --add-path combination.
+combined_stderr="$TEST_TMP/uninstall-combined.stderr"
+if (
+  cd "$INSTALL_TEST_DIR"
+  HOME="$INSTALL_TEST_HOME" PATH="/usr/bin:/bin" SHELL="/bin/bash" bash ./install.sh --uninstall --add-path
+) >/dev/null 2>"$combined_stderr"; then
+  printf 'Expected --uninstall --add-path to fail\n' >&2
+  exit 1
+fi
+assert_contains "$(cat "$combined_stderr")" "--uninstall cannot be combined with --add-path"
 
 printf 'smoke tests: ok\n'

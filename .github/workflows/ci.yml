@@ -12,8 +12,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Verify shell scripts
+      - name: Verify shell scripts (syntax)
         run: bash -n ./opencode-sandbox && bash -n ./install.sh && bash -n ./tests/smoke.sh
+
+      - name: Lint shell scripts (shellcheck)
+        run: shellcheck --shell=bash ./opencode-sandbox ./install.sh ./tests/smoke.sh
 
       - name: Run smoke tests
         run: make test

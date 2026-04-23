@@ -5,15 +5,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_SCRIPT="$SCRIPT_DIR/opencode-sandbox"
 TARGET_DIR="$HOME/.local/bin"
 TARGET_SCRIPT="$TARGET_DIR/opencode-sandbox"
+STATE_DIR="$HOME/.opencode-home"
 ADD_PATH=false
+UNINSTALL=false
 SHELL_RC=""
 
 usage() {
   cat <<'USAGE'
-Usage: install.sh [--add-path]
+Usage: install.sh [--add-path | --uninstall]
 
 Options:
   --add-path   Add ~/.local/bin to the detected shell rc file if needed
+  --uninstall  Remove the installed wrapper from ~/.local/bin
   --help       Show this help
 USAGE
 }
@@ -48,6 +51,10 @@ while [ $# -gt 0 ]; do
       ADD_PATH=true
       shift
       ;;
+    --uninstall)
+      UNINSTALL=true
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -60,6 +67,25 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+if [ "$UNINSTALL" = true ]; then
+  if [ "$ADD_PATH" = true ]; then
+    echo "Error: --uninstall cannot be combined with --add-path." >&2
+    exit 1
+  fi
+  if [ -e "$TARGET_SCRIPT" ]; then
+    rm -f "$TARGET_SCRIPT"
+    echo "Removed: $TARGET_SCRIPT"
+  else
+    echo "Nothing to remove at: $TARGET_SCRIPT"
+  fi
+  if [ -d "$STATE_DIR" ]; then
+    # Leave state alone — removing auth tokens and session history on uninstall
+    # would be a nasty surprise if the user is just bumping versions.
+    echo "State dir $STATE_DIR left in place. Remove manually if you no longer need it."
+  fi
+  exit 0
+fi
+
 if [ ! -f "$SOURCE_SCRIPT" ]; then
   echo "Error: '$SOURCE_SCRIPT' was not found."
   exit 1
@@ -70,6 +96,7 @@ install -m 0755 "$SOURCE_SCRIPT" "$TARGET_SCRIPT"
 
 echo "Installed: $TARGET_SCRIPT"
 
+# shellcheck disable=SC2016  # literal; the rc file expands $HOME at shell startup
 PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
 
 case ":$PATH:" in

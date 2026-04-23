@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+VERSION="0.1.0"
 IMAGE="${OPENCODE_IMAGE:-ghcr.io/anomalyco/opencode:latest}"
 OFFLINE=false
 PRINT_ONLY=false
@@ -16,6 +17,7 @@ Wrapper options:
   --pull              Pull the configured image before starting
   --print             Print the docker command and exit without changing the workspace
   --init-structure    Create tasks/, context/, tmp/, outputs/ in workspace
+  --version           Print the wrapper version and exit
   --help              Show this help
 
 Examples:
@@ -35,6 +37,7 @@ while [[ $# -gt 0 ]]; do
     --pull) PULL_IMAGE=true; shift ;;
     --print) PRINT_ONLY=true; shift ;;
     --init-structure) INIT_STRUCTURE=true; shift ;;
+    --version) printf 'opencode-sandbox %s\n' "$VERSION"; exit 0 ;;
     --help|-h) usage; exit 0 ;;
     --) shift; OPENCODE_ARGS+=("$@"); break ;;
     *) OPENCODE_ARGS+=("$1"); shift ;;
@@ -48,7 +51,29 @@ else
   echo "[opencode-sandbox][warn] No Git repository detected. Using current directory as workspace: $WORKDIR" >&2
 fi
 
-HOST_OPENCODE_HOME="$HOME/.opencode-home"
+# Slug the workspace basename the same way we name the container below, then
+# key the OpenCode home off it. Pre-v0.1.0 all workspaces shared
+# `~/.opencode-home/`, which let auth tokens and session state bleed between
+# unrelated projects. Isolate per workspace; the legacy layout is detected
+# and the user is warned with an opt-in migration hint below.
+WORKSPACE_SLUG="$(basename "$WORKDIR" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9_.-' '-')"
+WORKSPACE_SLUG="${WORKSPACE_SLUG#-}"
+WORKSPACE_SLUG="${WORKSPACE_SLUG%-}"
+if [[ -z "$WORKSPACE_SLUG" ]]; then
+  WORKSPACE_SLUG="workspace"
+fi
+
+OPENCODE_HOME_ROOT="$HOME/.opencode-home"
+HOST_OPENCODE_HOME="$OPENCODE_HOME_ROOT/$WORKSPACE_SLUG"
+
+# Legacy-layout detection: if the root dir contains any regular file directly
+# (not a sub-dir), it's pre-v0.1.0 state from the shared layout. Don't touch
+# it — setup might have been invested. Print one line on stderr.
+if [[ -d "$OPENCODE_HOME_ROOT" ]] && ! [[ -d "$HOST_OPENCODE_HOME" ]]; then
+  if find "$OPENCODE_HOME_ROOT" -maxdepth 1 -type f -print -quit 2>/dev/null | grep -q .; then
+    echo "[opencode-sandbox][warn] Legacy ~/.opencode-home/ state detected (shared across all workspaces before v0.1.0). New state for this workspace will live at ~/.opencode-home/$WORKSPACE_SLUG/. Move any files you want to keep manually." >&2
+  fi
+fi
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "[opencode-sandbox][error] Docker is not installed or not available in PATH." >&2
@@ -67,21 +92,13 @@ if [[ ! -f "$WORKDIR/PROJECT.md" ]]; then
   echo "[opencode-sandbox][warn] PROJECT.md not found in workspace root." >&2
 fi
 
-CONTAINER_NAME_SUFFIX="$(basename "$WORKDIR" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9_.-' '-')"
-CONTAINER_NAME_SUFFIX="${CONTAINER_NAME_SUFFIX#-}"
-CONTAINER_NAME_SUFFIX="${CONTAINER_NAME_SUFFIX%-}"
-
-if [[ -z "$CONTAINER_NAME_SUFFIX" ]]; then
-  CONTAINER_NAME_SUFFIX="workspace"
-fi
-
 DOCKER_ARGS=(run --rm -i)
 
 if [[ -t 0 && -t 1 ]]; then
   DOCKER_ARGS+=(-t)
 fi
 
-DOCKER_ARGS+=(--name "opencode-$CONTAINER_NAME_SUFFIX")
+DOCKER_ARGS+=(--name "opencode-$WORKSPACE_SLUG")
 
 if [[ "$OFFLINE" == true ]]; then
   DOCKER_ARGS+=(--network none)

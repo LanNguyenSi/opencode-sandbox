@@ -39,6 +39,14 @@ If `~/.local/bin` is not already in `PATH`, either add it yourself or let the in
 
 Then reload the shell file reported by `install.sh`.
 
+### Uninstall
+
+```bash
+./install.sh --uninstall
+```
+
+Removes the wrapper from `~/.local/bin`. Your `~/.opencode-home/` state (auth, session history) is left in place — remove it manually if you no longer need it.
+
 ## Quick checks
 
 ```bash
@@ -69,12 +77,13 @@ opencode-sandbox --print
 opencode-sandbox --pull
 opencode-sandbox --offline -- run "Summarize this workspace"
 opencode-sandbox --init-structure
+opencode-sandbox --version
 ```
 
 ## Wrapper behavior
 
 - mounts the current project at `/workspace`
-- stores OpenCode state in `~/.opencode-home` on the host
+- stores OpenCode state in `~/.opencode-home/<workspace-slug>/` on the host — state is isolated per workspace so auth tokens and session history don't leak between unrelated projects
 - mounts that directory as the container `HOME`
 - passes unknown arguments directly to OpenCode
 - automatically uses the Git repository root when applicable
@@ -83,11 +92,15 @@ opencode-sandbox --init-structure
 
 ## Important note about `.opencode-home`
 
-This wrapper stores OpenCode state in your user home at `~/.opencode-home`.
+This wrapper stores OpenCode state in your user home under `~/.opencode-home/<workspace-slug>/`, where `<workspace-slug>` is a sanitized form of the Git repo root (or current directory's basename when there is no repo).
 
-That keeps the project workspace clean and avoids creating `.opencode-home` inside each repository.
+That keeps the project workspace clean, avoids creating `.opencode-home` inside each repository, and — since v0.1.0 — keeps auth tokens and session history scoped to one project.
 
-If you want to reset local OpenCode state, remove or back up `~/.opencode-home`.
+### Upgrading from pre-v0.1.0
+
+Pre-v0.1.0 all workspaces shared a single `~/.opencode-home/`. On first run against v0.1.0+ the wrapper detects the legacy layout (files directly under `~/.opencode-home/`) and prints a one-line warning. It does **not** touch your existing state. Move anything you want to keep into the new per-workspace sub-dir manually.
+
+If you want to reset local OpenCode state for a single workspace, remove `~/.opencode-home/<that-slug>/`. To reset everything, remove `~/.opencode-home/` entirely.
 
 ## Optional project structure
 

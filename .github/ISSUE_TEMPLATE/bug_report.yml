@@ -37,3 +37,17 @@ body:
       label: --print output (if relevant)
       description: The generated docker command, when applicable.
       render: bash
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true

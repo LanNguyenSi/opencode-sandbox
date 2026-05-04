@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a reproducible problem in the wrapper or docs
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the problem clearly.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "macOS 14 / Ubuntu 22.04 / Windows 11"
+  - type: input
+    id: shell
+    attributes:
+      label: Shell
+      placeholder: "bash 5.1 / zsh 5.9"
+  - type: input
+    id: docker
+    attributes:
+      label: Docker version
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The exact wrapper command you ran.
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: print
+    attributes:
+      label: --print output (if relevant)
+      description: The generated docker command, when applicable.
+      render: bash
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true

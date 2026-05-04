@@ -27,7 +27,7 @@ Project maintainers may remove, edit, or reject comments, commits, code, issues,
 
 ## Reporting
 
-Please report conduct issues privately to the project maintainers.
+Email **contact@lan-nguyen-si.de** to report conduct issues. Reports are kept confidential.
 
 ## Scope
 

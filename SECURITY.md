@@ -11,7 +11,7 @@ Instead, share:
 - reproduction steps
 - impact assessment if known
 
-Until a dedicated private reporting channel exists, contact the maintainers directly and keep the report non-public.
+Email **contact@lan-nguyen-si.de** with the report and keep it non-public until a fix lands.
 
 ## Supported versions
 

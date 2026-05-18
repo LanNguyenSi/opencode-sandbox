@@ -87,8 +87,8 @@ opencode-sandbox --version
 - mounts that directory as the container `HOME`
 - passes unknown arguments directly to OpenCode
 - automatically uses the Git repository root when applicable
-- updates the image only when `--pull` is requested
-- supports overriding the image with `OPENCODE_IMAGE=...`
+- builds a local `opencode-sandbox:local` image from an embedded Dockerfile on first run, rebuilds it when `--pull` is requested
+- supports overriding the image with `OPENCODE_IMAGE=...` (a registry image; in that case `--pull` runs `docker pull` instead of rebuilding)
 
 ## Important note about `.opencode-home`
 
@@ -127,21 +127,23 @@ If `--pull` is also set, `--print` prints the `docker pull` command first and st
 
 ## Image selection
 
-By default, the wrapper uses `ghcr.io/anomalyco/opencode:latest`.
+By default, the wrapper builds and uses a local image, `opencode-sandbox:local`, from an embedded Dockerfile (Ubuntu 24.04 + the official `opencode.ai/install` script). The build runs automatically on the first launch and takes roughly 3-5 minutes.
 
-If you want a pinned or custom image, override it explicitly:
+The local-build default exists because the upstream `ghcr.io/anomalyco/opencode` image is an Alpine (musl) image, while opencode bundles a glibc-linked OpenTUI render library. On those images the TUI fails to initialize with `Error loading shared library ld-linux-x86-64.so.2`, and the process hangs with a blank terminal. See [anomalyco/opencode#28070](https://github.com/anomalyco/opencode/issues/28070).
+
+If you want to use a registry image anyway, override it explicitly:
 
 ```bash
 OPENCODE_IMAGE=ghcr.io/anomalyco/opencode:<tag> opencode-sandbox
 ```
 
-If you want to refresh the configured image before launching OpenCode, use:
+To refresh:
 
 ```bash
 opencode-sandbox --pull
 ```
 
-`--pull` pulls exactly the image selected by `OPENCODE_IMAGE` or the default image. It cannot be combined with `--offline`.
+`--pull` rebuilds the local default image (`docker build --pull --no-cache`), or runs `docker pull` against an `OPENCODE_IMAGE` override. It cannot be combined with `--offline`.
 
 ## docker-compose.yml
 

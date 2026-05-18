@@ -22,6 +22,12 @@ cat > "$FAKE_BIN/docker" <<'EOF'
     printf '[%s]\n' "$arg"
   done
 } >> "$DOCKER_LOG"
+# Report the local default image as absent so the wrapper's auto-build path
+# runs. Without this, every test would skip build and the behavior would never
+# be exercised end-to-end.
+if [[ "${1:-}" == "image" && "${2:-}" == "inspect" ]]; then
+  exit 1
+fi
 exit 0
 EOF
 chmod +x "$FAKE_BIN/docker" "$TEST_WORKDIR/opencode-sandbox"
@@ -75,7 +81,7 @@ assert_exists() {
 
 print_output="$(run_wrapper --print 2>&1)"
 assert_contains "$print_output" "docker run --rm -i --name opencode-workspace"
-assert_contains "$print_output" "ghcr.io/anomalyco/opencode:latest"
+assert_contains "$print_output" "opencode-sandbox:local"
 # Per-workspace home: the basename slug ("workspace" fallback here) is appended.
 assert_contains "$print_output" "-v $TEST_HOME/.opencode-home/workspace:/opencode-home"
 assert_contains "$print_output" "-e HOME=/opencode-home"
@@ -127,8 +133,16 @@ offline_output="$(run_wrapper --offline --print 2>&1)"
 assert_contains "$offline_output" "--network none"
 
 pull_print_output="$(run_wrapper --pull --print 2>&1)"
-assert_contains "$pull_print_output" "docker pull ghcr.io/anomalyco/opencode:latest"
+assert_contains "$pull_print_output" "docker build --pull --no-cache -t opencode-sandbox:local"
 assert_contains "$pull_print_output" "docker run --rm -i --name opencode-workspace"
+
+# OPENCODE_IMAGE override switches --pull --print back to docker pull.
+pull_print_override_output="$(
+  cd "$TEST_WORKDIR"
+  HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" OPENCODE_IMAGE="example.invalid/opencode:test" bash ./opencode-sandbox --pull --print 2>&1
+)"
+assert_contains "$pull_print_override_output" "docker pull example.invalid/opencode:test"
+assert_not_contains "$pull_print_override_output" "docker build"
 
 pull_offline_stdout="$TEST_TMP/pull-offline.stdout"
 pull_offline_stderr="$TEST_TMP/pull-offline.stderr"
@@ -191,11 +205,26 @@ run_wrapper --pull >/dev/null 2>&1 || {
   exit 1
 }
 docker_log_contents="$(cat "$DOCKER_LOG")"
-assert_contains "$docker_log_contents" "[pull]"
-assert_contains "$docker_log_contents" "[ghcr.io/anomalyco/opencode:latest]"
+assert_contains "$docker_log_contents" "[build]"
+assert_contains "$docker_log_contents" "[--pull]"
+assert_contains "$docker_log_contents" "[--no-cache]"
+assert_contains "$docker_log_contents" "[opencode-sandbox:local]"
 assert_contains "$docker_log_contents" "[run]"
 assert_contains "$docker_log_contents" "[--name]"
 assert_contains "$docker_log_contents" "[opencode-workspace]"
+
+# Without --pull, auto-build is triggered when the local image is absent
+# (the fake docker reports `image inspect` as nonzero for that exact case).
+: > "$DOCKER_LOG"
+run_wrapper >/dev/null 2>&1 || {
+  printf 'Expected default run to succeed\n' >&2
+  exit 1
+}
+docker_log_contents="$(cat "$DOCKER_LOG")"
+assert_contains "$docker_log_contents" "[image]"
+assert_contains "$docker_log_contents" "[inspect]"
+assert_contains "$docker_log_contents" "[build]"
+assert_contains "$docker_log_contents" "[run]"
 
 : > "$DOCKER_LOG"
 run_wrapper -- --pull --help "two words" >/dev/null 2>&1 || {
@@ -271,5 +300,22 @@ if (
   exit 1
 fi
 assert_contains "$(cat "$combined_stderr")" "--uninstall cannot be combined with --add-path"
+
+# The Dockerfile lives in two places: as a standalone file (used by
+# docker-compose's build:) and embedded as a heredoc in the wrapper (so the
+# installed script is self-contained). They will silently drift if a future
+# change touches only one. Compare the meaningful lines.
+extracted_embedded="$TEST_TMP/embedded.Dockerfile"
+sed -n "/<<'DOCKERFILE'$/,/^DOCKERFILE$/p" "$ROOT_DIR/opencode-sandbox" \
+  | sed '1d;$d' > "$extracted_embedded"
+ondisk_no_comments="$TEST_TMP/ondisk-stripped.Dockerfile"
+grep -vE '^[[:space:]]*(#|$)' "$ROOT_DIR/Dockerfile" > "$ondisk_no_comments"
+embedded_no_comments="$TEST_TMP/embedded-stripped.Dockerfile"
+grep -vE '^[[:space:]]*(#|$)' "$extracted_embedded" > "$embedded_no_comments"
+if ! diff -u "$ondisk_no_comments" "$embedded_no_comments" >/dev/null; then
+  printf 'Dockerfile drift: standalone Dockerfile and the heredoc embedded in opencode-sandbox differ.\n' >&2
+  diff -u "$ondisk_no_comments" "$embedded_no_comments" >&2 || true
+  exit 1
+fi
 
 printf 'smoke tests: ok\n'

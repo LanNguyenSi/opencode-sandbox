@@ -1,6 +1,9 @@
 services:
   opencode:
-    image: ${OPENCODE_IMAGE:-ghcr.io/anomalyco/opencode:latest}
+    image: ${OPENCODE_IMAGE:-opencode-sandbox:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
     stdin_open: true
     tty: true
     working_dir: /workspace

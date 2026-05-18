@@ -92,7 +92,7 @@ assert_not_contains "$print_output" " -t "
 # --version prints the version string and exits without invoking docker.
 : > "$DOCKER_LOG"
 version_output="$(run_wrapper --version 2>&1)"
-assert_contains "$version_output" "opencode-sandbox 0.1.0"
+assert_contains "$version_output" "opencode-sandbox 0.1.1"
 if [[ -s "$DOCKER_LOG" ]]; then
   printf 'Expected --version not to invoke docker, but docker was called:\n%s\n' \
     "$(cat "$DOCKER_LOG")" >&2

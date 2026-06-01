@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="0.2.0"
+VERSION="0.2.1"
 DEFAULT_LOCAL_IMAGE="opencode-sandbox:local"
 IMAGE="${OPENCODE_IMAGE:-$DEFAULT_LOCAL_IMAGE}"
 OFFLINE=false
@@ -18,6 +18,11 @@ if [[ -n "${OPENCODE_NO_USAGE:-}" ]]; then
 fi
 # Extra arguments forwarded to tokscale in --usage mode (e.g. --json, --today).
 TOKSCALE_PASSTHRU=()
+# Temp dir for the generated --usage --all settings file. Script-global (not
+# function-local) so the EXIT trap that cleans it up can still see it after
+# run_usage_mode returns; a function-local would be unset by then and trip
+# `set -u` in the trap.
+settings_dir=""
 
 usage() {
   cat <<'USAGE'
@@ -112,7 +117,8 @@ run_usage_mode() {
   local ts_args=(--client opencode --no-spinner)
   local docker_args=(run --rm
     -e HOME=/tmp/tshome -e XDG_CACHE_HOME=/tmp/tscache -e XDG_CONFIG_HOME=/tmp/tsconfig)
-  local settings_dir="" settings_mount="/tmp/tsconfig/tokscale/settings.json"
+  local settings_mount="/tmp/tsconfig/tokscale/settings.json"
+  settings_dir=""  # reset the script-global; the EXIT trap reads it
 
   if [[ "$USAGE_ALL" == true ]]; then
     docker_args+=(-v "$OPENCODE_HOME_ROOT:/data:ro")
@@ -136,8 +142,10 @@ run_usage_mode() {
       done
       settings_dir="$(mktemp -d)"
       # Clean the temp settings dir even if the build or the tokscale run below
-      # aborts (set -e) or is interrupted.
-      trap 'rm -rf "$settings_dir"' EXIT
+      # aborts (set -e) or is interrupted. The trap fires at script EXIT, after
+      # this function has returned, so it must read the script-global
+      # settings_dir defensively (${settings_dir:-}) to stay set -u safe.
+      trap '[[ -n "${settings_dir:-}" ]] && rm -rf "$settings_dir"' EXIT
       printf '{"scanner":{"opencodeDbPaths":[%s]}}' "$paths_json" \
         > "$settings_dir/settings.json"
       docker_args+=(-v "$settings_dir/settings.json:$settings_mount:ro")
@@ -169,6 +177,12 @@ run_usage_mode() {
   local rc=0
   docker "${docker_args[@]}" || rc=$?
   [[ -n "$settings_dir" ]] && rm -rf "$settings_dir"
+  # A non-zero result against the bundled image is most often a pre-v0.2.0
+  # image that has no tokscale. Point the user at the rebuild rather than
+  # leaving them with a bare "exec: tokscale: not found".
+  if [[ "$rc" -ne 0 && "$IMAGE" == "$DEFAULT_LOCAL_IMAGE" ]]; then
+    echo "[opencode-sandbox][warn] usage report failed (exit $rc). If the local image predates v0.2.0 it has no tokscale; rebuild it with: opencode-sandbox --pull" >&2
+  fi
   return "$rc"
 }
 

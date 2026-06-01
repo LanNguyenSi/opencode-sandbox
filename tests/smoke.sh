@@ -31,7 +31,7 @@ fi
 # FAKE_DOCKER_RUN_RC lets a test simulate a failing opencode container. It only
 # applies to the main run; the tokscale usage run (identified by its writable
 # XDG cache env) must still succeed so the post-run summary path is exercised.
-if [[ -n "${FAKE_DOCKER_RUN_RC:-}" && "${1:-}" == "run" ]]; then
+if [[ "${1:-}" == "run" ]]; then
   is_tokscale=false
   for arg in "$@"; do
     if [[ "$arg" == "XDG_CACHE_HOME=/tmp/tscache" ]]; then
@@ -39,7 +39,12 @@ if [[ -n "${FAKE_DOCKER_RUN_RC:-}" && "${1:-}" == "run" ]]; then
       break
     fi
   done
-  if [[ "$is_tokscale" != true ]]; then
+  # FAKE_DOCKER_USAGE_RC fails only the tokscale usage run (simulates a stale
+  # image without tokscale); FAKE_DOCKER_RUN_RC fails only the main opencode run.
+  if [[ "$is_tokscale" == true && -n "${FAKE_DOCKER_USAGE_RC:-}" ]]; then
+    exit "$FAKE_DOCKER_USAGE_RC"
+  fi
+  if [[ "$is_tokscale" != true && -n "${FAKE_DOCKER_RUN_RC:-}" ]]; then
     exit "$FAKE_DOCKER_RUN_RC"
   fi
 fi
@@ -107,7 +112,7 @@ assert_not_contains "$print_output" " -t "
 # --version prints the version string and exits without invoking docker.
 : > "$DOCKER_LOG"
 version_output="$(run_wrapper --version 2>&1)"
-assert_contains "$version_output" "opencode-sandbox 0.2.0"
+assert_contains "$version_output" "opencode-sandbox 0.2.1"
 if [[ -s "$DOCKER_LOG" ]]; then
   printf 'Expected --version not to invoke docker, but docker was called:\n%s\n' \
     "$(cat "$DOCKER_LOG")" >&2
@@ -286,6 +291,42 @@ usage_all_output="$(run_wrapper --usage --all --print 2>&1)"
 assert_contains "$usage_all_output" "-v $TEST_HOME/.opencode-home:/data:ro"
 assert_contains "$usage_all_output" "settings.json"
 assert_not_contains "$usage_all_output" "--home /data"
+
+# Regression: `--usage --all` (real, non-print) generates a temp settings dir
+# and registers an EXIT trap to clean it. The trap must read a script-global
+# settings_dir, not a function-local one, or it trips `set -u` with
+# "settings_dir: unbound variable" at exit. Needs a discoverable DB.
+usage_all_db="$TEST_HOME/.opencode-home/workspace/.local/share/opencode"
+mkdir -p "$usage_all_db"
+: > "$usage_all_db/opencode.db"
+: > "$DOCKER_LOG"
+set +e
+usage_all_run_out="$(run_wrapper --usage --all 2>&1)"
+usage_all_rc=$?
+set -e
+if [[ "$usage_all_rc" -ne 0 ]]; then
+  printf 'Expected --usage --all to exit 0, got %s:\n%s\n' "$usage_all_rc" "$usage_all_run_out" >&2
+  exit 1
+fi
+assert_not_contains "$usage_all_run_out" "unbound variable"
+assert_contains "$(cat "$DOCKER_LOG")" "XDG_CACHE_HOME=/tmp/tscache"
+
+# Regression: a usage run that fails against the bundled image (e.g. a pre-v0.2.0
+# image with no tokscale) must forward the exit code and emit the --pull hint
+# rather than a bare "tokscale: not found".
+: > "$DOCKER_LOG"
+set +e
+stale_hint_out="$(
+  cd "$TEST_WORKDIR"
+  HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" DOCKER_LOG="$DOCKER_LOG" FAKE_DOCKER_USAGE_RC=127 bash ./opencode-sandbox --usage 2>&1
+)"
+stale_rc=$?
+set -e
+if [[ "$stale_rc" -ne 127 ]]; then
+  printf 'Expected failing usage run to forward exit 127, got %s\n' "$stale_rc" >&2
+  exit 1
+fi
+assert_contains "$stale_hint_out" "opencode-sandbox --pull"
 
 # Auto-print after a normal run: with a workspace DB present, the wrapper runs
 # tokscale once more (today's usage) after the container exits.

@@ -12,7 +12,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN curl -fsSL https://opencode.ai/install | bash
 
-ENV PATH="/root/.opencode/bin:$PATH"
+# Token-usage reporting (opencode-sandbox --usage) shells out to tokscale, a
+# Node CLI. opencode ships as a single static binary with no JS runtime, so we
+# add bun and install tokscale globally. A tiny shim runs the node-shebang
+# tokscale binary under bun.
+RUN curl -fsSL https://bun.sh/install | bash
+
+ENV PATH="/usr/local/bin:/root/.bun/bin:/root/.opencode/bin:$PATH"
+
+RUN bun install -g tokscale@3.0.0
+
+RUN printf '#!/bin/sh\nexec bun /root/.bun/bin/tokscale "$@"\n' > /usr/local/bin/tokscale \
+    && chmod +x /usr/local/bin/tokscale
 
 WORKDIR /workspace
 

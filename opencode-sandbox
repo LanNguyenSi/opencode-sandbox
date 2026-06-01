@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="0.1.1"
+VERSION="0.2.0"
 DEFAULT_LOCAL_IMAGE="opencode-sandbox:local"
 IMAGE="${OPENCODE_IMAGE:-$DEFAULT_LOCAL_IMAGE}"
 OFFLINE=false
 PRINT_ONLY=false
 INIT_STRUCTURE=false
 PULL_IMAGE=false
+USAGE_MODE=false
+USAGE_ALL=false
+# Auto-print a one-line token-usage summary after a normal run. Opt out with
+# --no-usage or OPENCODE_NO_USAGE=1.
+AUTO_USAGE=true
+if [[ -n "${OPENCODE_NO_USAGE:-}" ]]; then
+  AUTO_USAGE=false
+fi
+# Extra arguments forwarded to tokscale in --usage mode (e.g. --json, --today).
+TOKSCALE_PASSTHRU=()
 
 usage() {
   cat <<'USAGE'
@@ -20,6 +30,13 @@ Wrapper options:
                       OPENCODE_IMAGE override, runs docker pull.
   --print             Print the docker command and exit without changing the workspace
   --init-structure    Create tasks/, context/, tmp/, outputs/ in workspace
+  --usage             Report token usage and cost for this workspace and exit.
+                      Combine with --all to aggregate across all workspaces, or
+                      pass tokscale flags through (e.g. --usage --json, --today).
+  --all               With --usage, aggregate across every workspace under
+                      ~/.opencode-home/ instead of just the current one.
+  --no-usage          Do not auto-print the post-run usage summary
+                      (same as OPENCODE_NO_USAGE=1).
   --version           Print the wrapper version and exit
   --help              Show this help
 
@@ -30,10 +47,14 @@ Examples:
   opencode-sandbox run "Summarize this workspace"
   opencode-sandbox --offline -- run "Summarize this workspace"
   opencode-sandbox --init-structure
+  opencode-sandbox --usage
+  opencode-sandbox --usage --all
+  opencode-sandbox --usage --json
 
 The default image is built locally on first run from an embedded Dockerfile
-(Ubuntu 24.04 + opencode.ai installer). Override with OPENCODE_IMAGE=... to
-use a different registry image.
+(Ubuntu 24.04 + opencode.ai installer + tokscale for usage reporting). Override
+with OPENCODE_IMAGE=... to use a different registry image; token-usage
+reporting requires the bundled default image.
 USAGE
 }
 
@@ -48,12 +69,137 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN curl -fsSL https://opencode.ai/install | bash
 
-ENV PATH="/root/.opencode/bin:$PATH"
+RUN curl -fsSL https://bun.sh/install | bash
+
+ENV PATH="/usr/local/bin:/root/.bun/bin:/root/.opencode/bin:$PATH"
+
+RUN bun install -g tokscale@3.0.0
+
+RUN printf '#!/bin/sh\nexec bun /root/.bun/bin/tokscale "$@"\n' > /usr/local/bin/tokscale \
+    && chmod +x /usr/local/bin/tokscale
 
 WORKDIR /workspace
 
 ENTRYPOINT ["opencode"]
 DOCKERFILE
+}
+
+ensure_local_image() {
+  if [[ "$IMAGE" == "$DEFAULT_LOCAL_IMAGE" ]] && ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    build_local_image
+  fi
+}
+
+# Report token usage and cost from the per-workspace OpenCode SQLite store using
+# the tokscale CLI baked into the default image. Honours --all, --print, and any
+# extra tokscale flags collected in TOKSCALE_PASSTHRU. Returns tokscale's exit
+# code (or 0 for the dry-run / no-data cases).
+run_usage_mode() {
+  if [[ "$IMAGE" != "$DEFAULT_LOCAL_IMAGE" ]]; then
+    echo "[opencode-sandbox][warn] --usage relies on the bundled tokscale; an OPENCODE_IMAGE override may not provide it." >&2
+  fi
+
+  # Default to a non-interactive table; tokscale's bare default is a TUI, which
+  # is useless when piped or scripted. Respect an explicit --json/--light.
+  local fmt_args=() has_fmt=false a
+  for a in "${TOKSCALE_PASSTHRU[@]+"${TOKSCALE_PASSTHRU[@]}"}"; do
+    case "$a" in --json | --light) has_fmt=true ;; esac
+  done
+  if [[ "$has_fmt" != true ]]; then
+    fmt_args=(--light)
+  fi
+
+  local ts_args=(--client opencode --no-spinner)
+  local docker_args=(run --rm
+    -e HOME=/tmp/tshome -e XDG_CACHE_HOME=/tmp/tscache -e XDG_CONFIG_HOME=/tmp/tsconfig)
+  local settings_dir="" settings_mount="/tmp/tsconfig/tokscale/settings.json"
+
+  if [[ "$USAGE_ALL" == true ]]; then
+    docker_args+=(-v "$OPENCODE_HOME_ROOT:/data:ro")
+    if [[ "$PRINT_ONLY" == true ]]; then
+      docker_args+=(-v "<generated-settings.json>:$settings_mount:ro")
+    else
+      local dbs=() db rel paths_json=""
+      while IFS= read -r db; do
+        dbs+=("$db")
+      done < <(find "$OPENCODE_HOME_ROOT" -type f -name opencode.db \
+                 -path '*/.local/share/opencode/opencode.db' 2>/dev/null | sort)
+      if [[ ${#dbs[@]} -eq 0 ]]; then
+        echo "[opencode-sandbox] No OpenCode usage data found under $OPENCODE_HOME_ROOT/." >&2
+        return 0
+      fi
+      # Map each host DB to its path under the read-only root mount.
+      for db in "${dbs[@]}"; do
+        rel="${db#"$OPENCODE_HOME_ROOT"/}"
+        [[ -n "$paths_json" ]] && paths_json+=","
+        paths_json+="\"/data/$rel\""
+      done
+      settings_dir="$(mktemp -d)"
+      # Clean the temp settings dir even if the build or the tokscale run below
+      # aborts (set -e) or is interrupted.
+      trap 'rm -rf "$settings_dir"' EXIT
+      printf '{"scanner":{"opencodeDbPaths":[%s]}}' "$paths_json" \
+        > "$settings_dir/settings.json"
+      docker_args+=(-v "$settings_dir/settings.json:$settings_mount:ro")
+    fi
+  else
+    if [[ "$PRINT_ONLY" != true && ! -d "$HOST_OPENCODE_HOME" ]]; then
+      echo "[opencode-sandbox] No OpenCode usage data for this workspace yet ($HOST_OPENCODE_HOME)." >&2
+      return 0
+    fi
+    docker_args+=(-v "$HOST_OPENCODE_HOME:/data:ro")
+    ts_args+=(--home /data)
+  fi
+
+  ts_args+=("${fmt_args[@]+"${fmt_args[@]}"}")
+  ts_args+=("${TOKSCALE_PASSTHRU[@]+"${TOKSCALE_PASSTHRU[@]}"}")
+
+  docker_args+=(--entrypoint sh "$IMAGE" -c
+    'mkdir -p /tmp/tshome /tmp/tscache /tmp/tsconfig && exec tokscale "$@"'
+    sh "${ts_args[@]}")
+
+  if [[ "$PRINT_ONLY" == true ]]; then
+    printf '%q ' docker "${docker_args[@]}"
+    printf '\n'
+    return 0
+  fi
+
+  ensure_local_image
+
+  local rc=0
+  docker "${docker_args[@]}" || rc=$?
+  [[ -n "$settings_dir" ]] && rm -rf "$settings_dir"
+  return "$rc"
+}
+
+# After a normal run, print a compact one-line summary of today's token usage
+# for this workspace. Best-effort: never fails the run, stays silent when there
+# is no data yet. Aggregates today's sessions, not strictly this one process.
+print_usage_after_run() {
+  local db="$HOST_OPENCODE_HOME/.local/share/opencode/opencode.db"
+  [[ -f "$db" ]] || return 0
+
+  local json
+  json="$(docker run --rm \
+    -e HOME=/tmp/tshome -e XDG_CACHE_HOME=/tmp/tscache -e XDG_CONFIG_HOME=/tmp/tsconfig \
+    -v "$HOST_OPENCODE_HOME:/data:ro" \
+    --entrypoint sh "$IMAGE" \
+    -c 'mkdir -p /tmp/tshome /tmp/tscache /tmp/tsconfig && exec tokscale --home /data --client opencode --no-spinner --today --json' \
+    2>/dev/null)" || return 0
+
+  # Extract the top-level totals. Anchor each grep to "<key>": <value> so it
+  # works whether tokscale emits pretty-printed or compact single-line JSON
+  # (a bare "first number on the line" grep would collapse all three to the
+  # same value on compact output).
+  local tin tout tcost
+  tin="$(printf '%s' "$json" | grep -oE '"totalInput"[[:space:]]*:[[:space:]]*[0-9]+' | head -1 | grep -oE '[0-9]+$')"
+  tout="$(printf '%s' "$json" | grep -oE '"totalOutput"[[:space:]]*:[[:space:]]*[0-9]+' | head -1 | grep -oE '[0-9]+$')"
+  tcost="$(printf '%s' "$json" | grep -oE '"totalCost"[[:space:]]*:[[:space:]]*-?[0-9.eE+-]+' | head -1 | sed -E 's/.*:[[:space:]]*//')"
+  # tokscale emits -0.0 for a zero cost; drop the artifact sign for display.
+  tcost="${tcost#-}"
+
+  printf '[opencode-sandbox] token usage today (this workspace): %s in, %s out, $%s (full report: opencode-sandbox --usage)\n' \
+    "${tin:-0}" "${tout:-0}" "${tcost:-0}" >&2
 }
 
 OPENCODE_ARGS=()
@@ -63,10 +209,28 @@ while [[ $# -gt 0 ]]; do
     --pull) PULL_IMAGE=true; shift ;;
     --print) PRINT_ONLY=true; shift ;;
     --init-structure) INIT_STRUCTURE=true; shift ;;
+    --usage) USAGE_MODE=true; shift ;;
+    --all) USAGE_ALL=true; shift ;;
+    --no-usage) AUTO_USAGE=false; shift ;;
     --version) printf 'opencode-sandbox %s\n' "$VERSION"; exit 0 ;;
     --help|-h) usage; exit 0 ;;
-    --) shift; OPENCODE_ARGS+=("$@"); break ;;
-    *) OPENCODE_ARGS+=("$1"); shift ;;
+    --)
+      shift
+      if [[ "$USAGE_MODE" == true ]]; then
+        TOKSCALE_PASSTHRU+=("$@")
+      else
+        OPENCODE_ARGS+=("$@")
+      fi
+      break
+      ;;
+    *)
+      if [[ "$USAGE_MODE" == true ]]; then
+        TOKSCALE_PASSTHRU+=("$1")
+      else
+        OPENCODE_ARGS+=("$1")
+      fi
+      shift
+      ;;
   esac
 done
 
@@ -111,11 +275,20 @@ if [[ "$OFFLINE" == true && "$PULL_IMAGE" == true ]]; then
   exit 1
 fi
 
-if [[ ! -f "$WORKDIR/AGENTS.md" ]]; then
-  echo "[opencode-sandbox][warn] AGENTS.md not found in workspace root." >&2
+if [[ "$USAGE_MODE" != true ]]; then
+  if [[ ! -f "$WORKDIR/AGENTS.md" ]]; then
+    echo "[opencode-sandbox][warn] AGENTS.md not found in workspace root." >&2
+  fi
+  if [[ ! -f "$WORKDIR/PROJECT.md" ]]; then
+    echo "[opencode-sandbox][warn] PROJECT.md not found in workspace root." >&2
+  fi
 fi
-if [[ ! -f "$WORKDIR/PROJECT.md" ]]; then
-  echo "[opencode-sandbox][warn] PROJECT.md not found in workspace root." >&2
+
+# --usage short-circuits the normal opencode run: it reports token usage and
+# cost from the per-workspace OpenCode SQLite store via the bundled tokscale.
+if [[ "$USAGE_MODE" == true ]]; then
+  run_usage_mode
+  exit $?
 fi
 
 DOCKER_ARGS=(run --rm -i)
@@ -172,6 +345,20 @@ if [[ "$PULL_IMAGE" == true ]]; then
   fi
 elif [[ "$IMAGE" == "$DEFAULT_LOCAL_IMAGE" ]] && ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   build_local_image
+fi
+
+# When auto-usage is enabled we cannot exec: the wrapper has to regain control
+# after the container exits to print the post-run summary. Preserve the
+# container's exit code and forward it. tokscale lives only in the bundled
+# default image, so skip the summary for OPENCODE_IMAGE overrides.
+if [[ "$AUTO_USAGE" == true && "$IMAGE" == "$DEFAULT_LOCAL_IMAGE" ]]; then
+  # Capture the exit code inline: under `set -e` a bare `docker ...` that exits
+  # non-zero would abort the script before we could print the summary or
+  # forward the code. We still want the summary after a failed/aborted run.
+  rc=0
+  docker "${DOCKER_ARGS[@]}" || rc=$?
+  print_usage_after_run || true
+  exit "$rc"
 fi
 
 exec docker "${DOCKER_ARGS[@]}"

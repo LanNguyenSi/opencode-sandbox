@@ -28,6 +28,21 @@ cat > "$FAKE_BIN/docker" <<'EOF'
 if [[ "${1:-}" == "image" && "${2:-}" == "inspect" ]]; then
   exit 1
 fi
+# FAKE_DOCKER_RUN_RC lets a test simulate a failing opencode container. It only
+# applies to the main run; the tokscale usage run (identified by its writable
+# XDG cache env) must still succeed so the post-run summary path is exercised.
+if [[ -n "${FAKE_DOCKER_RUN_RC:-}" && "${1:-}" == "run" ]]; then
+  is_tokscale=false
+  for arg in "$@"; do
+    if [[ "$arg" == "XDG_CACHE_HOME=/tmp/tscache" ]]; then
+      is_tokscale=true
+      break
+    fi
+  done
+  if [[ "$is_tokscale" != true ]]; then
+    exit "$FAKE_DOCKER_RUN_RC"
+  fi
+fi
 exit 0
 EOF
 chmod +x "$FAKE_BIN/docker" "$TEST_WORKDIR/opencode-sandbox"
@@ -92,7 +107,7 @@ assert_not_contains "$print_output" " -t "
 # --version prints the version string and exits without invoking docker.
 : > "$DOCKER_LOG"
 version_output="$(run_wrapper --version 2>&1)"
-assert_contains "$version_output" "opencode-sandbox 0.1.1"
+assert_contains "$version_output" "opencode-sandbox 0.2.0"
 if [[ -s "$DOCKER_LOG" ]]; then
   printf 'Expected --version not to invoke docker, but docker was called:\n%s\n' \
     "$(cat "$DOCKER_LOG")" >&2
@@ -243,6 +258,100 @@ custom_image_output="$(
   HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" OPENCODE_IMAGE="example.invalid/opencode:test" bash ./opencode-sandbox --print 2>&1
 )"
 assert_contains "$custom_image_output" "example.invalid/opencode:test"
+
+# --usage --print: dry-run of the tokscale invocation against the per-workspace
+# store. Reads the home read-only, defaults to a --light table, does not run
+# docker or touch any state.
+: > "$DOCKER_LOG"
+usage_print_output="$(run_wrapper --usage --print 2>&1)"
+assert_contains "$usage_print_output" "-v $TEST_HOME/.opencode-home/workspace:/data:ro"
+assert_contains "$usage_print_output" "tokscale"
+assert_contains "$usage_print_output" "--home /data"
+assert_contains "$usage_print_output" "--client opencode"
+assert_contains "$usage_print_output" "--no-spinner"
+assert_contains "$usage_print_output" "--light"
+if [[ -s "$DOCKER_LOG" ]]; then
+  printf 'Expected --usage --print not to invoke docker, but it did:\n%s\n' "$(cat "$DOCKER_LOG")" >&2
+  exit 1
+fi
+
+# An explicit --json suppresses the default --light table and is forwarded.
+usage_json_output="$(run_wrapper --usage --json --print 2>&1)"
+assert_contains "$usage_json_output" "--json"
+assert_not_contains "$usage_json_output" "--light"
+
+# --usage --all mounts the home root read-only and feeds tokscale a generated
+# settings file listing every workspace DB.
+usage_all_output="$(run_wrapper --usage --all --print 2>&1)"
+assert_contains "$usage_all_output" "-v $TEST_HOME/.opencode-home:/data:ro"
+assert_contains "$usage_all_output" "settings.json"
+assert_not_contains "$usage_all_output" "--home /data"
+
+# Auto-print after a normal run: with a workspace DB present, the wrapper runs
+# tokscale once more (today's usage) after the container exits.
+usage_db_dir="$TEST_HOME/.opencode-home/workspace/.local/share/opencode"
+mkdir -p "$usage_db_dir"
+: > "$usage_db_dir/opencode.db"
+: > "$DOCKER_LOG"
+run_wrapper >/dev/null 2>&1 || {
+  printf 'Expected default run with auto-usage to succeed\n' >&2
+  exit 1
+}
+auto_usage_log="$(cat "$DOCKER_LOG")"
+# The tokscale invocation is uniquely identified by its writable XDG cache env;
+# the normal opencode run never sets it. tokscale's own flags live inside the
+# `sh -c` script, so they are logged as one argument, not separate brackets.
+assert_contains "$auto_usage_log" "XDG_CACHE_HOME=/tmp/tscache"
+assert_contains "$auto_usage_log" "--today"
+
+# A failing opencode container must still forward its exit code AND still run
+# the post-run summary (the wrapper captures the code inline rather than letting
+# `set -e` abort before the summary).
+: > "$DOCKER_LOG"
+set +e
+(
+  cd "$TEST_WORKDIR"
+  HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" DOCKER_LOG="$DOCKER_LOG" FAKE_DOCKER_RUN_RC=7 bash ./opencode-sandbox >/dev/null 2>&1
+)
+fail_rc=$?
+set -e
+if [[ "$fail_rc" -ne 7 ]]; then
+  printf 'Expected failing run to forward exit code 7, got %s\n' "$fail_rc" >&2
+  exit 1
+fi
+assert_contains "$(cat "$DOCKER_LOG")" "XDG_CACHE_HOME=/tmp/tscache"
+
+# --no-usage opts out of the post-run summary.
+: > "$DOCKER_LOG"
+run_wrapper --no-usage >/dev/null 2>&1 || {
+  printf 'Expected --no-usage run to succeed\n' >&2
+  exit 1
+}
+assert_not_contains "$(cat "$DOCKER_LOG")" "XDG_CACHE_HOME=/tmp/tscache"
+
+# OPENCODE_NO_USAGE=1 also opts out.
+: > "$DOCKER_LOG"
+(
+  cd "$TEST_WORKDIR"
+  HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" DOCKER_LOG="$DOCKER_LOG" OPENCODE_NO_USAGE=1 bash ./opencode-sandbox >/dev/null 2>&1
+) || {
+  printf 'Expected OPENCODE_NO_USAGE run to succeed\n' >&2
+  exit 1
+}
+assert_not_contains "$(cat "$DOCKER_LOG")" "XDG_CACHE_HOME=/tmp/tscache"
+
+# A custom OPENCODE_IMAGE has no bundled tokscale, so auto-print is skipped.
+: > "$DOCKER_LOG"
+(
+  cd "$TEST_WORKDIR"
+  HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" DOCKER_LOG="$DOCKER_LOG" OPENCODE_IMAGE="example.invalid/opencode:test" bash ./opencode-sandbox >/dev/null 2>&1
+) || {
+  printf 'Expected custom-image run to succeed\n' >&2
+  exit 1
+}
+assert_not_contains "$(cat "$DOCKER_LOG")" "XDG_CACHE_HOME=/tmp/tscache"
+
+rm -rf "$TEST_HOME/.opencode-home/workspace/.local"
 
 INSTALL_TEST_HOME="$TEST_TMP/install-home"
 INSTALL_TEST_DIR="$TEST_TMP/install-src"

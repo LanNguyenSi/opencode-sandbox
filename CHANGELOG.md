@@ -4,6 +4,15 @@ All notable changes to this project should be documented in this file.
 
 ## Unreleased
 
+## [0.2.0] - 2026-06-01
+
+### Added
+- Token-usage tracking. `opencode-sandbox --usage` reports tokens and cost for the current workspace, `--usage --all` aggregates across every workspace under `~/.opencode-home/`, and any extra flags (`--json`, `--today`, ...) pass through to the underlying reporter. After a normal run the wrapper also prints a one-line summary of today's usage for the workspace; opt out with `--no-usage` or `OPENCODE_NO_USAGE=1`.
+- Reporting is powered by [tokscale](https://github.com/junhoyeo/tokscale), pinned and baked into the default image (it reads OpenCode's per-workspace SQLite store). The image now also includes bun as the JS runtime tokscale needs.
+
+### Changed
+- When auto-usage is active the wrapper no longer `exec`s docker for a normal run: it waits for the container, prints the summary, then exits with the container's exit code. The fast `exec` path is kept when auto-usage is disabled. Usage reporting requires the bundled default image; it is skipped for `OPENCODE_IMAGE` overrides.
+
 ## [0.1.1] - 2026-05-18
 
 ### Fixed

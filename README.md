@@ -77,6 +77,8 @@ opencode-sandbox --print
 opencode-sandbox --pull
 opencode-sandbox --offline -- run "Summarize this workspace"
 opencode-sandbox --init-structure
+opencode-sandbox --usage
+opencode-sandbox --usage --all
 opencode-sandbox --version
 ```
 
@@ -89,6 +91,45 @@ opencode-sandbox --version
 - automatically uses the Git repository root when applicable
 - builds a local `opencode-sandbox:local` image from an embedded Dockerfile on first run, rebuilds it when `--pull` is requested
 - supports overriding the image with `OPENCODE_IMAGE=...` (a registry image; in that case `--pull` runs `docker pull` instead of rebuilding)
+
+## Token usage tracking
+
+The wrapper can report how many tokens (and how much money) your OpenCode
+sessions consumed. Reporting is handled by
+[tokscale](https://github.com/junhoyeo/tokscale), which is baked into the
+default image and reads OpenCode's per-workspace SQLite store directly. No data
+leaves your machine; tokscale only reaches the network to refresh model pricing
+(cached locally for an hour).
+
+```bash
+opencode-sandbox --usage            # tokens + cost for the current workspace
+opencode-sandbox --usage --all      # aggregate across all workspaces
+opencode-sandbox --usage --json     # machine-readable output
+opencode-sandbox --usage --today    # any extra flag is forwarded to tokscale
+```
+
+`--usage` defaults to a readable table. Any flag you pass after `--usage` (for
+example `--json`, `--today`, `--week`, `--group-by session,model`) is forwarded
+straight to tokscale.
+
+After a normal run the wrapper prints a one-line summary of today's usage for
+the workspace, for example:
+
+```text
+[opencode-sandbox] token usage today (this workspace): 1286 in, 296 out, $0.0037 (full report: opencode-sandbox --usage)
+```
+
+Opt out of the post-run line with `--no-usage` or `OPENCODE_NO_USAGE=1`.
+
+Notes and limitations:
+- Reporting requires the bundled default image. With an `OPENCODE_IMAGE`
+  override the post-run summary is skipped and `--usage` may not find tokscale.
+- The post-run summary aggregates today's sessions for the workspace, not
+  strictly the single run that just finished. Use `--usage` for the full
+  breakdown.
+- Cost is computed from token counts using public pricing. OpenCode itself
+  stores cost as `0`, so a network-less environment may show tokens without a
+  cost figure.
 
 ## Important note about `.opencode-home`
 
@@ -127,7 +168,7 @@ If `--pull` is also set, `--print` prints the `docker pull` command first and st
 
 ## Image selection
 
-By default, the wrapper builds and uses a local image, `opencode-sandbox:local`, from an embedded Dockerfile (Ubuntu 24.04 + the official `opencode.ai/install` script). The build runs automatically on the first launch and takes roughly 3-5 minutes.
+By default, the wrapper builds and uses a local image, `opencode-sandbox:local`, from an embedded Dockerfile (Ubuntu 24.04 + the official `opencode.ai/install` script, plus bun and the `tokscale` CLI used for usage reporting). The build runs automatically on the first launch and takes roughly 3-5 minutes.
 
 The local-build default exists because the upstream `ghcr.io/anomalyco/opencode` image is an Alpine (musl) image, while opencode bundles a glibc-linked OpenTUI render library. On those images the TUI fails to initialize with `Error loading shared library ld-linux-x86-64.so.2`, and the process hangs with a blank terminal. See [anomalyco/opencode#28070](https://github.com/anomalyco/opencode/issues/28070).
 

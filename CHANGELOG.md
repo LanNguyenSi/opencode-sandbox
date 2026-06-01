@@ -4,6 +4,12 @@ All notable changes to this project should be documented in this file.
 
 ## Unreleased
 
+## [0.2.1] - 2026-06-01
+
+### Fixed
+- `opencode-sandbox --usage --all` crashed with `settings_dir: unbound variable` under `set -u`: the cleanup `trap ... EXIT` referenced a function-local variable that no longer existed when the trap fired after the function returned. `settings_dir` is now a script-global, read defensively in the trap.
+- A usage run against a pre-0.2.0 local image (which has no `tokscale`) printed a bare `exec: tokscale: not found`. It now forwards the exit code and points at the fix: rebuild with `opencode-sandbox --pull`.
+
 ## [0.2.0] - 2026-06-01
 
 ### Added

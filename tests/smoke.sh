@@ -99,11 +99,36 @@ assert_exists() {
   fi
 }
 
+# Mirror the wrapper's per-workspace slug scheme: a human-readable basename plus
+# a short hash of the absolute path. Two directories that share a basename get
+# distinct slugs, so tests must derive the expected slug from the actual workdir
+# rather than hard-coding the basename.
+workspace_slug() {
+  local workdir="$1" name
+  name="$(basename "$workdir" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9_.-' '-')"
+  name="${name#-}"
+  name="${name%-}"
+  [[ -z "$name" ]] && name="workspace"
+  printf '%s-%s' "$name" "$(printf '%s' "$workdir" | sha256sum | cut -c1-8)"
+}
+
+TEST_SLUG="$(workspace_slug "$TEST_WORKDIR")"
+
+# Regression: two workspaces that share a basename must NOT share a slug, or
+# their auth/session state would collide (audit finding #49).
+collision_a="$TEST_TMP/dir-a/project"
+collision_b="$TEST_TMP/dir-b/project"
+mkdir -p "$collision_a" "$collision_b"
+if [[ "$(workspace_slug "$collision_a")" == "$(workspace_slug "$collision_b")" ]]; then
+  printf 'Slug collision: same-basename workspaces produced identical slugs\n' >&2
+  exit 1
+fi
+
 print_output="$(run_wrapper --print 2>&1)"
-assert_contains "$print_output" "docker run --rm -i --name opencode-workspace"
+assert_contains "$print_output" "docker run --rm -i --name opencode-$TEST_SLUG"
 assert_contains "$print_output" "opencode-sandbox:local"
-# Per-workspace home: the basename slug ("workspace" fallback here) is appended.
-assert_contains "$print_output" "-v $TEST_HOME/.opencode-home/workspace:/opencode-home"
+# Per-workspace home: the disambiguated slug (basename + path hash) is appended.
+assert_contains "$print_output" "-v $TEST_HOME/.opencode-home/$TEST_SLUG:/opencode-home"
 assert_contains "$print_output" "-e HOME=/opencode-home"
 assert_contains "$print_output" "[opencode-sandbox][warn] No Git repository detected."
 assert_contains "$print_output" "[opencode-sandbox][warn] AGENTS.md not found in workspace root."
@@ -129,11 +154,11 @@ legacy_output="$(
   HOME="$legacy_home" PATH="$FAKE_BIN:$PATH" bash ./opencode-sandbox --print 2>&1
 )"
 assert_contains "$legacy_output" "Legacy ~/.opencode-home/ state detected"
-assert_contains "$legacy_output" "$legacy_home/.opencode-home/workspace:/opencode-home"
+assert_contains "$legacy_output" "$legacy_home/.opencode-home/$TEST_SLUG:/opencode-home"
 
-# Same workspace with the new per-slug sub-dir already present → no legacy warn.
+# Same workspace with the new per-slug sub-dir already present, so no legacy warn.
 clean_home="$TEST_TMP/clean-home"
-mkdir -p "$clean_home/.opencode-home/workspace"
+mkdir -p "$clean_home/.opencode-home/$TEST_SLUG"
 clean_output="$(
   cd "$TEST_WORKDIR"
   HOME="$clean_home" PATH="$FAKE_BIN:$PATH" bash ./opencode-sandbox --print 2>&1
@@ -141,7 +166,7 @@ clean_output="$(
 assert_not_contains "$clean_output" "Legacy ~/.opencode-home/ state detected"
 
 init_print_output="$(run_wrapper --init-structure --print 2>&1)"
-assert_contains "$init_print_output" "docker run --rm -i --name opencode-workspace"
+assert_contains "$init_print_output" "docker run --rm -i --name opencode-$TEST_SLUG"
 assert_not_exists "$TEST_WORKDIR/.opencode-home"
 assert_not_exists "$TEST_HOME/.opencode-home"
 assert_not_exists "$TEST_WORKDIR/tasks"
@@ -154,7 +179,7 @@ assert_contains "$offline_output" "--network none"
 
 pull_print_output="$(run_wrapper --pull --print 2>&1)"
 assert_contains "$pull_print_output" "docker build --pull --no-cache -t opencode-sandbox:local"
-assert_contains "$pull_print_output" "docker run --rm -i --name opencode-workspace"
+assert_contains "$pull_print_output" "docker run --rm -i --name opencode-$TEST_SLUG"
 
 # OPENCODE_IMAGE override switches --pull --print back to docker pull.
 pull_print_override_output="$(
@@ -184,7 +209,7 @@ space_output="$(
   cd "$space_dir"
   HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" bash ./opencode-sandbox --print 2>&1
 )"
-assert_contains "$space_output" "--name opencode-space-dir"
+assert_contains "$space_output" "--name opencode-$(workspace_slug "$space_dir")"
 
 if command -v git >/dev/null 2>&1; then
   git_root="$TEST_TMP/git-root"
@@ -204,7 +229,7 @@ if command -v git >/dev/null 2>&1; then
     HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" bash ./opencode-sandbox --print 2>&1
   )"
   assert_contains "$git_output" "-v $git_root:/workspace"
-  assert_contains "$git_output" "--name opencode-git-root"
+  assert_contains "$git_output" "--name opencode-$(workspace_slug "$git_root")"
   assert_not_contains "$git_output" "No Git repository detected."
 fi
 
@@ -231,7 +256,7 @@ assert_contains "$docker_log_contents" "[--no-cache]"
 assert_contains "$docker_log_contents" "[opencode-sandbox:local]"
 assert_contains "$docker_log_contents" "[run]"
 assert_contains "$docker_log_contents" "[--name]"
-assert_contains "$docker_log_contents" "[opencode-workspace]"
+assert_contains "$docker_log_contents" "[opencode-$TEST_SLUG]"
 
 # Without --pull, auto-build is triggered when the local image is absent
 # (the fake docker reports `image inspect` as nonzero for that exact case).
@@ -269,7 +294,7 @@ assert_contains "$custom_image_output" "example.invalid/opencode:test"
 # docker or touch any state.
 : > "$DOCKER_LOG"
 usage_print_output="$(run_wrapper --usage --print 2>&1)"
-assert_contains "$usage_print_output" "-v $TEST_HOME/.opencode-home/workspace:/data:ro"
+assert_contains "$usage_print_output" "-v $TEST_HOME/.opencode-home/$TEST_SLUG:/data:ro"
 assert_contains "$usage_print_output" "tokscale"
 assert_contains "$usage_print_output" "--home /data"
 assert_contains "$usage_print_output" "--client opencode"
@@ -296,7 +321,7 @@ assert_not_contains "$usage_all_output" "--home /data"
 # and registers an EXIT trap to clean it. The trap must read a script-global
 # settings_dir, not a function-local one, or it trips `set -u` with
 # "settings_dir: unbound variable" at exit. Needs a discoverable DB.
-usage_all_db="$TEST_HOME/.opencode-home/workspace/.local/share/opencode"
+usage_all_db="$TEST_HOME/.opencode-home/$TEST_SLUG/.local/share/opencode"
 mkdir -p "$usage_all_db"
 : > "$usage_all_db/opencode.db"
 : > "$DOCKER_LOG"
@@ -330,7 +355,7 @@ assert_contains "$stale_hint_out" "opencode-sandbox --pull"
 
 # Auto-print after a normal run: with a workspace DB present, the wrapper runs
 # tokscale once more (today's usage) after the container exits.
-usage_db_dir="$TEST_HOME/.opencode-home/workspace/.local/share/opencode"
+usage_db_dir="$TEST_HOME/.opencode-home/$TEST_SLUG/.local/share/opencode"
 mkdir -p "$usage_db_dir"
 : > "$usage_db_dir/opencode.db"
 : > "$DOCKER_LOG"
@@ -392,7 +417,7 @@ assert_not_contains "$(cat "$DOCKER_LOG")" "XDG_CACHE_HOME=/tmp/tscache"
 }
 assert_not_contains "$(cat "$DOCKER_LOG")" "XDG_CACHE_HOME=/tmp/tscache"
 
-rm -rf "$TEST_HOME/.opencode-home/workspace/.local"
+rm -rf "$TEST_HOME/.opencode-home/$TEST_SLUG/.local"
 
 INSTALL_TEST_HOME="$TEST_TMP/install-home"
 INSTALL_TEST_DIR="$TEST_TMP/install-src"

@@ -85,7 +85,7 @@ opencode-sandbox --version
 ## Wrapper behavior
 
 - mounts the current project at `/workspace`
-- stores OpenCode state in `~/.opencode-home/<workspace-slug>/` on the host — state is isolated per workspace so auth tokens and session history don't leak between unrelated projects
+- stores OpenCode state in `~/.opencode-home/<workspace-slug>/` on the host, isolated per workspace so auth tokens and session history don't leak between unrelated projects
 - mounts that directory as the container `HOME`
 - passes unknown arguments directly to OpenCode
 - automatically uses the Git repository root when applicable
@@ -133,13 +133,17 @@ Notes and limitations:
 
 ## Important note about `.opencode-home`
 
-This wrapper stores OpenCode state in your user home under `~/.opencode-home/<workspace-slug>/`, where `<workspace-slug>` is a sanitized form of the Git repo root (or current directory's basename when there is no repo).
+This wrapper stores OpenCode state in your user home under `~/.opencode-home/<workspace-slug>/`, where `<workspace-slug>` is the workspace directory's basename (the Git repo root's basename, or the current directory's basename when there is no repo) followed by a short hash of its absolute path. Only the basename is human-readable; the full path is not encoded. The path hash keeps two different directories that happen to share a basename (for example `~/work/api` and `~/play/api`) from colliding on the same state dir.
 
 That keeps the project workspace clean, avoids creating `.opencode-home` inside each repository, and — since v0.1.0 — keeps auth tokens and session history scoped to one project.
 
 ### Upgrading from pre-v0.1.0
 
 Pre-v0.1.0 all workspaces shared a single `~/.opencode-home/`. On first run against v0.1.0+ the wrapper detects the legacy layout (files directly under `~/.opencode-home/`) and prints a one-line warning. It does **not** touch your existing state. Move anything you want to keep into the new per-workspace sub-dir manually.
+
+### Slug scheme change
+
+Earlier releases keyed state on the workspace basename alone, which let two directories that share a basename collide on the same state dir. The slug now appends a short hash of the absolute path. State created by an older version stays under the old basename-only directory (`~/.opencode-home/<basename>/`) and is **not** migrated automatically: your first run after upgrading starts a fresh state dir. Move anything you want to keep (auth, session history) from the old directory into the new one, then remove the old directory.
 
 If you want to reset local OpenCode state for a single workspace, remove `~/.opencode-home/<that-slug>/`. To reset everything, remove `~/.opencode-home/` entirely.
 

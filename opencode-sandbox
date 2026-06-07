@@ -255,17 +255,21 @@ else
   echo "[opencode-sandbox][warn] No Git repository detected. Using current directory as workspace: $WORKDIR" >&2
 fi
 
-# Slug the workspace basename the same way we name the container below, then
-# key the OpenCode home off it. Pre-v0.1.0 all workspaces shared
-# `~/.opencode-home/`, which let auth tokens and session state bleed between
-# unrelated projects. Isolate per workspace; the legacy layout is detected
-# and the user is warned with an opt-in migration hint below.
-WORKSPACE_SLUG="$(basename "$WORKDIR" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9_.-' '-')"
-WORKSPACE_SLUG="${WORKSPACE_SLUG#-}"
-WORKSPACE_SLUG="${WORKSPACE_SLUG%-}"
-if [[ -z "$WORKSPACE_SLUG" ]]; then
-  WORKSPACE_SLUG="workspace"
+# Derive a per-workspace slug to key the OpenCode home (and the container name
+# below) off. The slug is a human-readable basename plus a short hash of the
+# absolute workspace path. The basename alone is ambiguous: two unrelated
+# directories that share a name (e.g. ~/work/api and ~/play/api) would map to
+# the same state dir and leak auth tokens and session history between projects.
+# The path hash disambiguates them. Pre-v0.1.0 all workspaces shared a single
+# `~/.opencode-home/`; that legacy layout is detected and the user is warned
+# with an opt-in migration hint below.
+WORKSPACE_NAME="$(basename "$WORKDIR" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9_.-' '-')"
+WORKSPACE_NAME="${WORKSPACE_NAME#-}"
+WORKSPACE_NAME="${WORKSPACE_NAME%-}"
+if [[ -z "$WORKSPACE_NAME" ]]; then
+  WORKSPACE_NAME="workspace"
 fi
+WORKSPACE_SLUG="${WORKSPACE_NAME}-$(printf '%s' "$WORKDIR" | sha256sum | cut -c1-8)"
 
 OPENCODE_HOME_ROOT="$HOME/.opencode-home"
 HOST_OPENCODE_HOME="$OPENCODE_HOME_ROOT/$WORKSPACE_SLUG"

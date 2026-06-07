@@ -27,9 +27,11 @@ jobs:
 
       - name: Extract changelog for this version
         id: changelog
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          awk '/^## \[${{ steps.version.outputs.version }}\]/{found=1; next} /^## \[/{found=0} found' CHANGELOG.md > release_notes.md
-          echo "Release notes extracted for v${{ steps.version.outputs.version }}"
+          awk -v ver="$VERSION" 'index($0, "## [" ver "]")==1{found=1; next} /^## \[/{found=0} found' CHANGELOG.md > release_notes.md
+          echo "Release notes extracted for v$VERSION"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

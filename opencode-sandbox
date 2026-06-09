@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="0.2.1"
+VERSION="0.2.2"
 DEFAULT_LOCAL_IMAGE="opencode-sandbox:local"
 IMAGE="${OPENCODE_IMAGE:-$DEFAULT_LOCAL_IMAGE}"
 OFFLINE=false

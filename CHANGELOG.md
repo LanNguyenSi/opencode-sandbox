@@ -4,6 +4,14 @@ All notable changes to this project should be documented in this file.
 
 ## Unreleased
 
+## [0.2.2] - 2026-06-09
+
+Security patch remediating two MEDIUM audit findings.
+
+### Security
+- **Per-workspace state slug now disambiguates by absolute path** (#49). The slug was the workspace basename alone, so two directories that share a basename (for example `~/work/api` and `~/play/api`) collided on the same `~/.opencode-home/<slug>/` state dir and shared auth tokens and session history. The slug now appends a short hash of the absolute workspace path, and the container `--name` reuses the same slug. **Upgrader note**: state is re-keyed, so your first run after upgrading starts a fresh state dir under the new slug. State created by an older version stays under the old basename-only directory (`~/.opencode-home/<basename>/`) and is not migrated automatically; move auth and session history over manually if you want to keep it, then remove the old directory.
+- **Release workflow hardened against GitHub Actions expression injection** (#48). The git tag version is now passed into `awk` through an env var (`-v`) instead of being interpolated into the `run:` script, closing an expression-injection vector on tag push.
+
 ## [0.2.1] - 2026-06-01
 
 ### Fixed

@@ -79,7 +79,9 @@ opencode-sandbox --offline -- run "Summarize this workspace"
 opencode-sandbox --init-structure
 opencode-sandbox --usage
 opencode-sandbox --usage --all
+opencode-sandbox --no-usage
 opencode-sandbox --version
+opencode-sandbox --help
 ```
 
 ## Wrapper behavior
@@ -92,12 +94,15 @@ opencode-sandbox --version
 - builds a local `opencode-sandbox:local` image from an embedded Dockerfile on first run, rebuilds it when `--pull` is requested
 - supports overriding the image with `OPENCODE_IMAGE=...` (a registry image; in that case `--pull` runs `docker pull` instead of rebuilding)
 
+On a normal run (not `--usage`) the wrapper checks the workspace root for `AGENTS.md` and `PROJECT.md`. If either is missing it prints an informational line such as `[opencode-sandbox][warn] AGENTS.md not found in workspace root.`. These warnings are harmless: they are reminders for agent-style projects, and the wrapper still runs normally against any ordinary directory.
+
 ## Token usage tracking
 
 The wrapper can report how many tokens (and how much money) your OpenCode
 sessions consumed. Reporting is handled by
 [tokscale](https://github.com/junhoyeo/tokscale), which is baked into the
-default image and reads OpenCode's per-workspace SQLite store directly. No data
+default image (pinned to `tokscale@3.0.0` in the embedded Dockerfile) and reads
+OpenCode's per-workspace SQLite store directly. No data
 leaves your machine; tokscale only reaches the network to refresh model pricing
 (cached locally for an hour).
 
@@ -168,7 +173,7 @@ Suggested roles:
 
 `--print` is a real dry-run mode. It prints the generated Docker command and exits without creating `~/.opencode-home` or any optional workspace directories.
 
-If `--pull` is also set, `--print` prints the `docker pull` command first and still exits without changing anything.
+If `--pull` is also set, `--print` first prints the rebuild command (`docker build --pull --no-cache` for the default local image, or `docker pull` for an `OPENCODE_IMAGE` override) and still exits without changing anything.
 
 ## Image selection
 

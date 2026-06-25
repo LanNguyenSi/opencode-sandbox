@@ -8,6 +8,46 @@ This version is intentionally focused on a stable core:
 - OpenCode arguments are passed through
 - no experimental modes in the default setup
 
+## How it works
+
+A single invocation of the wrapper resolves the workspace, ensures the local Docker image exists, runs OpenCode in an isolated container, and prints a token-usage summary on exit.
+
+```mermaid
+flowchart TD
+    subgraph startup ["Startup"]
+        A["parse options<br/>opencode-sandbox"]
+        B["resolve workspace root<br/>git rev-parse --show-toplevel / pwd"]
+        C["compute WORKSPACE_SLUG<br/>basename + sha256sum(path)[:8]"]
+        D[("~/.opencode-home/slug/<br/>HOST_OPENCODE_HOME")]
+        A --> B --> C --> D
+    end
+
+    subgraph image ["Image"]
+        E{"local image present?<br/>docker image inspect"}
+        F["build_local_image()<br/>opencode-sandbox"]
+        G[("embedded Dockerfile<br/>ubuntu:24.04, opencode.ai/install<br/>bun, tokscale@3.0.0")]
+        E -- no --> F --> G
+    end
+
+    subgraph container ["Container run"]
+        H["docker run<br/>-v workspace:/workspace<br/>-v state:/opencode-home -e HOME=/opencode-home"]
+        I["OpenCode<br/>TUI / run / auth / passthrough"]
+        H --> I
+    end
+
+    subgraph postrun ["Post-run"]
+        J["print_usage_after_run()<br/>opencode-sandbox"]
+        K[("opencode.db<br/>.local/share/opencode/opencode.db")]
+        L["one-line usage summary<br/>stderr"]
+        J --> K --> L
+    end
+
+    D --> E
+    E -- yes --> H
+    G --> H
+    I --> J
+```
+
 ## Included
 
 - `opencode-sandbox`: wrapper script

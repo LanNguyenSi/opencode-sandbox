@@ -47,6 +47,11 @@ if [[ "${1:-}" == "run" ]]; then
   if [[ "$is_tokscale" != true && -n "${FAKE_DOCKER_RUN_RC:-}" ]]; then
     exit "$FAKE_DOCKER_RUN_RC"
   fi
+  # FAKE_TOKSCALE_JSON, when set, is emitted on stdout for the tokscale usage
+  # run so a test can assert the wrapper's JSON parsing and summary output.
+  if [[ "$is_tokscale" == true && -n "${FAKE_TOKSCALE_JSON:-}" ]]; then
+    printf '%s' "$FAKE_TOKSCALE_JSON"
+  fi
 fi
 exit 0
 EOF
@@ -417,6 +422,78 @@ assert_not_contains "$(cat "$DOCKER_LOG")" "XDG_CACHE_HOME=/tmp/tscache"
 }
 assert_not_contains "$(cat "$DOCKER_LOG")" "XDG_CACHE_HOME=/tmp/tscache"
 
+# docker-not-installed guard (opencode-sandbox:286). run_wrapper always prepends
+# a fake `docker` to PATH, so the hard-fail path is otherwise never exercised.
+# Build a PATH that carries the coreutils the wrapper needs before the check
+# (basename, tr, sha256sum, cut) but no docker, and assert the guard aborts with
+# the right message and a non-zero exit. Invoke bash by absolute path so finding
+# the interpreter itself does not depend on the stripped PATH.
+NODOCKER_BIN="$TEST_TMP/nodocker-bin"
+mkdir -p "$NODOCKER_BIN"
+for tool in basename tr sha256sum cut find grep dirname; do
+  tool_path="$(command -v "$tool" 2>/dev/null || true)"
+  if [[ -n "$tool_path" ]]; then
+    ln -sf "$tool_path" "$NODOCKER_BIN/$tool"
+  fi
+done
+BASH_BIN="$(command -v bash)"
+nodocker_stderr="$TEST_TMP/nodocker.stderr"
+if (
+  cd "$TEST_WORKDIR"
+  HOME="$TEST_TMP/nodocker-home" PATH="$NODOCKER_BIN" "$BASH_BIN" ./opencode-sandbox
+) >/dev/null 2>"$nodocker_stderr"; then
+  printf 'Expected the wrapper to fail when docker is absent\n' >&2
+  exit 1
+fi
+assert_contains "$(cat "$nodocker_stderr")" "[opencode-sandbox][error] Docker is not installed or not available in PATH."
+
+# print_usage_after_run JSON parsing (opencode-sandbox:209-215). The fake docker
+# emits FAKE_TOKSCALE_JSON on the tokscale usage run so we can assert the summary
+# line shows each total extracted DISTINCTLY (the anchored grep must not collapse
+# them) from compact JSON, and that a -0.0 cost has its sign stripped from pretty
+# JSON.
+usage_compact_stderr="$TEST_TMP/usage-compact.stderr"
+if ! (
+  cd "$TEST_WORKDIR"
+  HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" DOCKER_LOG="$DOCKER_LOG" \
+    FAKE_TOKSCALE_JSON='{"totalInput":1234,"totalOutput":5678,"totalCost":9.5}' \
+    "$BASH_BIN" ./opencode-sandbox
+) >/dev/null 2>"$usage_compact_stderr"; then
+  printf 'Expected the wrapper run to succeed for the usage-parse test\n' >&2
+  exit 1
+fi
+assert_contains "$(cat "$usage_compact_stderr")" "token usage today (this workspace): 1234 in, 5678 out, \$9.5 "
+
+usage_pretty_stderr="$TEST_TMP/usage-pretty.stderr"
+if ! (
+  cd "$TEST_WORKDIR"
+  HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" DOCKER_LOG="$DOCKER_LOG" \
+    FAKE_TOKSCALE_JSON='{
+  "totalInput": 0,
+  "totalOutput": 42,
+  "totalCost": -0.0
+}' \
+    "$BASH_BIN" ./opencode-sandbox
+) >/dev/null 2>"$usage_pretty_stderr"; then
+  printf 'Expected the wrapper run to succeed for the pretty-JSON usage-parse test\n' >&2
+  exit 1
+fi
+assert_contains "$(cat "$usage_pretty_stderr")" "token usage today (this workspace): 0 in, 42 out, \$0.0 "
+
+# Empty tokscale output falls back to the ${tin:-0}/${tout:-0}/${tcost:-0}
+# defaults (opencode-sandbox:216) instead of printing blank fields.
+usage_empty_stderr="$TEST_TMP/usage-empty.stderr"
+if ! (
+  cd "$TEST_WORKDIR"
+  HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" DOCKER_LOG="$DOCKER_LOG" \
+    FAKE_TOKSCALE_JSON='' \
+    "$BASH_BIN" ./opencode-sandbox
+) >/dev/null 2>"$usage_empty_stderr"; then
+  printf 'Expected the wrapper run to succeed for the empty-JSON usage test\n' >&2
+  exit 1
+fi
+assert_contains "$(cat "$usage_empty_stderr")" "token usage today (this workspace): 0 in, 0 out, \$0 "
+
 rm -rf "$TEST_HOME/.opencode-home/$TEST_SLUG/.local"
 
 INSTALL_TEST_HOME="$TEST_TMP/install-home"
@@ -475,6 +552,71 @@ if (
   exit 1
 fi
 assert_contains "$(cat "$combined_stderr")" "--uninstall cannot be combined with --add-path"
+
+# detect_shell_rc zsh branch (install.sh:26-27): a zsh user whose ~/.local/bin is
+# not yet on PATH must get their ~/.zshrc wired, not ~/.bashrc.
+ZSH_TEST_HOME="$TEST_TMP/install-home-zsh"
+mkdir -p "$ZSH_TEST_HOME"
+zsh_install_output="$(
+  cd "$INSTALL_TEST_DIR"
+  HOME="$ZSH_TEST_HOME" PATH="/usr/bin:/bin" SHELL="/usr/bin/zsh" bash ./install.sh --add-path 2>&1
+)"
+assert_contains "$zsh_install_output" "Added PATH entry to $ZSH_TEST_HOME/.zshrc"
+# shellcheck disable=SC2016  # literal; the rc file expands $HOME at shell startup
+assert_contains "$(cat "$ZSH_TEST_HOME/.zshrc")" 'export PATH="$HOME/.local/bin:$PATH"'
+assert_not_exists "$ZSH_TEST_HOME/.bashrc"
+
+# PATH-already-present branch (install.sh:104): when ~/.local/bin is already on
+# PATH, the installer says so and does not print the "does not contain" guidance.
+ALREADY_TEST_HOME="$TEST_TMP/install-home-already"
+mkdir -p "$ALREADY_TEST_HOME"
+already_install_output="$(
+  cd "$INSTALL_TEST_DIR"
+  HOME="$ALREADY_TEST_HOME" PATH="$ALREADY_TEST_HOME/.local/bin:/usr/bin:/bin" SHELL="/bin/bash" bash ./install.sh 2>&1
+)"
+assert_contains "$already_install_output" "PATH already contains ~/.local/bin"
+assert_not_contains "$already_install_output" "PATH does not contain"
+
+# Unknown-option rejection (install.sh:63): an unrecognized flag aborts non-zero
+# with a named error.
+unknown_opt_stderr="$TEST_TMP/install-unknown.stderr"
+if (
+  cd "$INSTALL_TEST_DIR"
+  HOME="$INSTALL_TEST_HOME" PATH="/usr/bin:/bin" SHELL="/bin/bash" bash ./install.sh --bogus-flag
+) >/dev/null 2>"$unknown_opt_stderr"; then
+  printf 'Expected install.sh to reject an unknown option\n' >&2
+  exit 1
+fi
+assert_contains "$(cat "$unknown_opt_stderr")" "Error: unknown option '--bogus-flag'"
+
+# --help / -h (install.sh:58): prints usage and exits 0 without installing.
+help_output="$(
+  cd "$INSTALL_TEST_DIR"
+  HOME="$INSTALL_TEST_HOME" PATH="/usr/bin:/bin" SHELL="/bin/bash" bash ./install.sh --help 2>&1
+)"
+assert_contains "$help_output" "Usage: install.sh"
+help_short_output="$(
+  cd "$INSTALL_TEST_DIR"
+  HOME="$INSTALL_TEST_HOME" PATH="/usr/bin:/bin" SHELL="/bin/bash" bash ./install.sh -h 2>&1
+)"
+assert_contains "$help_short_output" "Usage: install.sh"
+
+# Missing source-script guard (install.sh:89): install.sh run without its sibling
+# opencode-sandbox wrapper aborts non-zero instead of installing an empty target.
+NOSRC_DIR="$TEST_TMP/install-nosrc"
+mkdir -p "$NOSRC_DIR"
+cp "$ROOT_DIR/install.sh" "$NOSRC_DIR/install.sh"
+chmod +x "$NOSRC_DIR/install.sh"
+nosrc_out="$TEST_TMP/install-nosrc.out"
+if (
+  cd "$NOSRC_DIR"
+  HOME="$TEST_TMP/install-home-nosrc" PATH="/usr/bin:/bin" SHELL="/bin/bash" bash ./install.sh
+) >"$nosrc_out" 2>&1; then
+  printf 'Expected install.sh to fail when the source wrapper is missing\n' >&2
+  exit 1
+fi
+assert_contains "$(cat "$nosrc_out")" "was not found"
+assert_not_exists "$TEST_TMP/install-home-nosrc/.local/bin/opencode-sandbox"
 
 # The Dockerfile lives in two places: as a standalone file (used by
 # docker-compose's build:) and embedded as a heredoc in the wrapper (so the

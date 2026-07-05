@@ -4,6 +4,9 @@ All notable changes to this project should be documented in this file.
 
 ## Unreleased
 
+### Tests
+- Closed the four coverage gaps from the 2026-06-27 audit in `tests/smoke.sh`: the docker-not-installed guard, `install.sh`'s `detect_shell_rc` zsh branch and PATH-already-present branch, `install.sh`'s unknown-option / `--help` / missing-source error paths, and the `print_usage_after_run` JSON parsing (compact vs pretty extraction, the `-0.0` sign strip, and the empty-output fallback). Each is mutation-checked. No production behavior change.
+
 ## [0.2.2] - 2026-06-09
 
 Security patch remediating two MEDIUM audit findings.

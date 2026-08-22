@@ -9,7 +9,7 @@ All notable changes to this project should be documented in this file.
 
 ### Tests
 - Closed the four coverage gaps from the 2026-06-27 audit in `tests/smoke.sh`: the docker-not-installed guard, `install.sh`'s `detect_shell_rc` zsh branch and PATH-already-present branch, `install.sh`'s unknown-option / `--help` / missing-source error paths, and the `print_usage_after_run` JSON parsing (compact vs pretty extraction, the `-0.0` sign strip, and the empty-output fallback). Each is mutation-checked. No production behavior change.
-- `tests/smoke.sh` itself now works on a `sha256sum`-less PATH: its own slug helper and the docker-guard PATH fixture support the `shasum` fallback, and new tests cover the fallback equality, the shasum-only PATH, and the neither-tool error path.
+- `tests/smoke.sh` itself now works without `sha256sum` on PATH (own slug helper and docker-guard fixture support the `shasum` fallback), and fails fast with a clear message if neither tool is present, instead of a misleading assertion later.
 
 ## [0.2.2] - 2026-06-09
 

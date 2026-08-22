@@ -22,6 +22,16 @@ sha256_hex() {
   fi
 }
 
+# workspace_slug() (below) and the wrapper's own sha256_hex() both need
+# sha256sum or shasum on PATH. Fail fast with a clear message here, before
+# any test that calls workspace_slug() runs; otherwise a host with neither
+# tool fails much later with a misleading "Slug collision" assertion instead
+# of the real cause.
+if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+  printf 'FAIL: neither sha256sum nor shasum found on PATH; these smoke tests require one of them\n' >&2
+  exit 1
+fi
+
 mkdir -p "$TEST_WORKDIR" "$FAKE_BIN" "$TEST_HOME"
 cp "$ROOT_DIR/opencode-sandbox" "$TEST_WORKDIR/opencode-sandbox"
 cp "$ROOT_DIR/PROJECT.md" "$TEST_WORKDIR/PROJECT.md"
@@ -658,16 +668,12 @@ fi
 # sha256sum/shasum fallback (opencode-sandbox: sha256_hex). The wrapper
 # prefers sha256sum but falls back to `shasum -a 256` when it's absent, and
 # both must fold a fixed input into the identical 8-char slug or workspace
-# state would split across the two tools. This whole block requires `shasum`
-# on the host (README now declares it a supported fallback, so a missing
-# shasum is a hard failure here, not a silent skip); the sha256sum-vs-shasum
-# equality check further requires `sha256sum` and only runs when both tools
-# are present (e.g. under `PATH=/usr/bin:/bin` on a stock macOS, sha256sum
-# lives in /sbin and is unavailable).
-if ! command -v shasum >/dev/null 2>&1; then
-  printf 'FAIL: shasum not found on PATH; the sha256sum/shasum fallback tests cannot run\n' >&2
-  exit 1
-fi
+# state would split across the two tools. The presence of at least one of
+# them is already guaranteed by the PATH check near the top of this file;
+# the sha256sum-vs-shasum equality check below additionally requires
+# `sha256sum` and only runs when both tools are present (e.g. under
+# `PATH=/usr/bin:/bin` on a stock macOS, sha256sum lives in /sbin and is
+# unavailable, but shasum still is).
 FALLBACK_TESTS_SKIPPED=""
 if command -v sha256sum >/dev/null 2>&1; then
   fixed_input="opencode-sandbox-slug-fixture"

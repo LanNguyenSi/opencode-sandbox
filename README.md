@@ -58,7 +58,7 @@ flowchart TD
 
 - Docker
 - Bash
-- coreutils (`sha256sum`; recent macOS ships it in `/sbin`, see below)
+- `sha256sum` (GNU coreutils on Linux; recent macOS ships it in `/sbin`, see below)
 - optional Git
 
 Git is not required. If the current directory is not a Git repository, the wrapper simply uses the current directory as the workspace.
@@ -159,10 +159,11 @@ opencode-sandbox --usage --today    # extra tokscale flags are forwarded
 `--usage` defaults to a readable table. Any flag you pass after `--usage` that
 the wrapper does not itself recognize (for example `--json`, `--today`,
 `--week`, `--group-by session,model`) is forwarded straight to tokscale.
-Flags the wrapper reserves for itself (`--offline`, `--pull`, `--print`,
-`--init-structure`, `--all`, `--no-usage`, `--version`, `--help`/`-h`) are
-still consumed by the wrapper even after `--usage` (`--all` means "aggregate
-across workspaces" in the wrapper itself); use `--` after `--usage` to force
+Flags the wrapper reserves for itself (`--usage`, `--offline`, `--pull`,
+`--print`, `--init-structure`, `--all`, `--no-usage`, `--version`,
+`--help`/`-h`) are still consumed by the wrapper even after `--usage`
+(`--all` means "aggregate across workspaces" in the wrapper itself; a second
+`--usage` is simply consumed again); use `--` after `--usage` to force
 everything that follows through to tokscale unchanged.
 
 After a normal run the wrapper prints a one-line summary of today's usage for
@@ -251,7 +252,7 @@ If you want to use Compose, place your project under `./workspace` or adjust the
 
 Unlike the wrapper, the Compose file mounts the shared `${HOME}/.opencode-home` directory as container HOME, without per-workspace isolation: every project run through Compose shares the same auth tokens and session history. Point the volume at a per-project subdirectory if you need the isolation the wrapper provides.
 
-Running Compose writes state directly into `~/.opencode-home/` (not into a per-workspace subdirectory), so a later `opencode-sandbox` run in that same home detects that legacy layout and prints its warning about state living outside the per-workspace directory.
+Running Compose writes state directly into `~/.opencode-home/` (not into a per-workspace subdirectory), so a later `opencode-sandbox` run in that same home prints its legacy-layout warning, unless that workspace's own state dir already exists.
 
 ## Project docs
 

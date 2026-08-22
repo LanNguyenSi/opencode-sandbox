@@ -17,7 +17,7 @@ flowchart TD
     subgraph startup ["Startup"]
         A["parse options<br/>opencode-sandbox"]
         B["resolve workspace root<br/>git rev-parse --show-toplevel / pwd"]
-        C["compute WORKSPACE_SLUG<br/>basename + sha256sum(path)[:8]"]
+        C["compute WORKSPACE_SLUG<br/>basename + sha256(path)[:8]"]
         D[("~/.opencode-home/slug/<br/>HOST_OPENCODE_HOME")]
         A --> B --> C --> D
     end
@@ -58,12 +58,10 @@ flowchart TD
 
 - Docker
 - Bash
-- `sha256sum` (GNU coreutils on Linux; recent macOS ships it in `/sbin`, see below)
+- `sha256sum` or `shasum` (either works; the wrapper prefers `sha256sum` and falls back to `shasum -a 256`)
 - optional Git
 
 Git is not required. If the current directory is not a Git repository, the wrapper simply uses the current directory as the workspace.
-
-Recent macOS ships `sha256sum` in `/sbin`; older releases only have `shasum`. If `command -v sha256sum` finds nothing, run `brew install coreutils` and add its `gnubin` directory to `PATH`: `export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"` (Homebrew's coreutils installs the command as `gsha256sum` unless that directory is on `PATH`).
 
 ## Installation
 

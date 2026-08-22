@@ -233,8 +233,14 @@ if command -v git >/dev/null 2>&1; then
     cd "$git_nested"
     HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" bash ./opencode-sandbox --print 2>&1
   )"
-  assert_contains "$git_output" "-v $git_root:/workspace"
-  assert_contains "$git_output" "--name opencode-$(workspace_slug "$git_root")"
+  # The wrapper derives WORKDIR from `git rev-parse --show-toplevel`, which
+  # resolves symlinks (e.g. macOS's /var -> /private/var TMPDIR symlink).
+  # $git_root here is the pre-resolution path we built it from, so canonicalize
+  # both sides with the same `pwd -P` the wrapper effectively relies on before
+  # comparing, rather than asserting on the raw (possibly symlinked) path.
+  git_root_real="$(cd "$git_root" && pwd -P)"
+  assert_contains "$git_output" "-v $git_root_real:/workspace"
+  assert_contains "$git_output" "--name opencode-$(workspace_slug "$git_root_real")"
   assert_not_contains "$git_output" "No Git repository detected."
 fi
 
@@ -633,6 +639,53 @@ if ! diff -u "$ondisk_no_comments" "$embedded_no_comments" >/dev/null; then
   printf 'Dockerfile drift: standalone Dockerfile and the heredoc embedded in opencode-sandbox differ.\n' >&2
   diff -u "$ondisk_no_comments" "$embedded_no_comments" >&2 || true
   exit 1
+fi
+
+# sha256sum/shasum fallback (opencode-sandbox: sha256_hex). The wrapper
+# prefers sha256sum but falls back to `shasum -a 256` when it's absent, and
+# both must fold a fixed input into the identical 8-char slug or workspace
+# state would split across the two tools.
+if command -v shasum >/dev/null 2>&1; then
+  fixed_input="opencode-sandbox-slug-fixture"
+  via_sha256sum="$(printf '%s' "$fixed_input" | sha256sum | cut -d' ' -f1 | cut -c1-8)"
+  via_shasum="$(printf '%s' "$fixed_input" | shasum -a 256 | cut -d' ' -f1 | cut -c1-8)"
+  if [[ "$via_sha256sum" != "$via_shasum" ]]; then
+    printf 'sha256sum and shasum -a 256 slugs differ for the same input: %s vs %s\n' \
+      "$via_sha256sum" "$via_shasum" >&2
+    exit 1
+  fi
+
+  # Hide sha256sum from PATH (a stock PATH minus sha256sum, plus shasum) and
+  # confirm --version and a workspace-slug computation (--print) both still
+  # work, taking the shasum fallback branch of sha256_hex().
+  NOSHA_BIN="$TEST_TMP/nosha-bin"
+  mkdir -p "$NOSHA_BIN"
+  for tool in basename tr cut find grep dirname shasum; do
+    tool_path="$(command -v "$tool" 2>/dev/null || true)"
+    if [[ -n "$tool_path" ]]; then
+      ln -sf "$tool_path" "$NOSHA_BIN/$tool"
+    fi
+  done
+  ln -sf "$FAKE_BIN/docker" "$NOSHA_BIN/docker"
+  if [[ -e "$NOSHA_BIN/sha256sum" ]]; then
+    printf 'sha256sum leaked into the no-sha256sum PATH fixture\n' >&2
+    exit 1
+  fi
+
+  nosha_version_output="$(
+    cd "$TEST_WORKDIR"
+    HOME="$TEST_HOME" PATH="$NOSHA_BIN" "$BASH_BIN" ./opencode-sandbox --version 2>&1
+  )"
+  assert_contains "$nosha_version_output" "opencode-sandbox 0.2.2"
+
+  nosha_print_output="$(
+    cd "$TEST_WORKDIR"
+    HOME="$TEST_HOME" PATH="$NOSHA_BIN" "$BASH_BIN" ./opencode-sandbox --print 2>&1
+  )"
+  assert_contains "$nosha_print_output" "--name opencode-$TEST_SLUG"
+  assert_contains "$nosha_print_output" "-v $TEST_HOME/.opencode-home/$TEST_SLUG:/opencode-home"
+else
+  printf 'skipping shasum-fallback tests: shasum not found on PATH\n' >&2
 fi
 
 printf 'smoke tests: ok\n'

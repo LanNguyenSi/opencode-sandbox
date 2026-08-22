@@ -24,6 +24,19 @@ TOKSCALE_PASSTHRU=()
 # `set -u` in the trap.
 settings_dir=""
 
+# Print the sha256 hex digest of stdin, using whichever tool is on PATH.
+# Recent macOS ships /sbin/sha256sum; older releases only have `shasum`
+# (part of the Perl-based Digest::SHA, present on macOS by default). Both
+# print the digest followed by whitespace and a filename/dash, so trimming
+# to the first field keeps the output identical either way.
+sha256_hex() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | cut -d' ' -f1
+  else
+    shasum -a 256 | cut -d' ' -f1
+  fi
+}
+
 usage() {
   cat <<'USAGE'
 Usage: opencode-sandbox [wrapper-options] [--] [opencode-args...]
@@ -269,7 +282,7 @@ WORKSPACE_NAME="${WORKSPACE_NAME%-}"
 if [[ -z "$WORKSPACE_NAME" ]]; then
   WORKSPACE_NAME="workspace"
 fi
-WORKSPACE_SLUG="${WORKSPACE_NAME}-$(printf '%s' "$WORKDIR" | sha256sum | cut -c1-8)"
+WORKSPACE_SLUG="${WORKSPACE_NAME}-$(printf '%s' "$WORKDIR" | sha256_hex | cut -c1-8)"
 
 OPENCODE_HOME_ROOT="$HOME/.opencode-home"
 HOST_OPENCODE_HOME="$OPENCODE_HOME_ROOT/$WORKSPACE_SLUG"

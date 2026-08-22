@@ -58,12 +58,10 @@ flowchart TD
 
 - Docker
 - Bash
-- `sha256sum` (GNU coreutils on Linux; recent macOS ships it in `/sbin`, see below)
+- `sha256sum` or `shasum` (either works; the wrapper prefers `sha256sum` and falls back to `shasum -a 256`)
 - optional Git
 
 Git is not required. If the current directory is not a Git repository, the wrapper simply uses the current directory as the workspace.
-
-Recent macOS ships `sha256sum` in `/sbin`; older releases only have `shasum`. If `command -v sha256sum` finds nothing, run `brew install coreutils` and add its `gnubin` directory to `PATH`: `export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"` (Homebrew's coreutils installs the command as `gsha256sum` unless that directory is on `PATH`).
 
 ## Installation
 

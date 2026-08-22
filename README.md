@@ -58,9 +58,12 @@ flowchart TD
 
 - Docker
 - Bash
+- coreutils (`sha256sum`; on macOS this is not installed by default, see below)
 - optional Git
 
 Git is not required. If the current directory is not a Git repository, the wrapper simply uses the current directory as the workspace.
+
+On macOS, `sha256sum` is not part of the base system (only `shasum` is). Install coreutils first, for example `brew install coreutils`, before running the wrapper.
 
 ## Installation
 
@@ -153,9 +156,13 @@ opencode-sandbox --usage --json     # machine-readable output
 opencode-sandbox --usage --today    # any extra flag is forwarded to tokscale
 ```
 
-`--usage` defaults to a readable table. Any flag you pass after `--usage` (for
-example `--json`, `--today`, `--week`, `--group-by session,model`) is forwarded
-straight to tokscale.
+`--usage` defaults to a readable table. Any flag you pass after `--usage` that
+the wrapper does not itself recognize (for example `--json`, `--today`,
+`--week`, `--group-by session,model`) is forwarded straight to tokscale.
+Flags the wrapper reserves for itself (`--offline`, `--pull`, `--print`,
+`--init-structure`, `--no-usage`, `--version`, `--help`) are still consumed by
+the wrapper even after `--usage`; use `--` to force everything after it
+through to tokscale unchanged.
 
 After a normal run the wrapper prints a one-line summary of today's usage for
 the workspace, for example:
@@ -240,6 +247,8 @@ opencode-sandbox --pull
 The Compose file is intended as a simple reference. The preferred path is currently the `opencode-sandbox` wrapper, because it uses the current working directory directly as the workspace.
 
 If you want to use Compose, place your project under `./workspace` or adjust the volume mount.
+
+Unlike the wrapper, the Compose file mounts the shared `${HOME}/.opencode-home` directory as container HOME, without per-workspace isolation: every project run through Compose shares the same auth tokens and session history. Point the volume at a per-project subdirectory if you need the isolation the wrapper provides.
 
 ## Project docs
 

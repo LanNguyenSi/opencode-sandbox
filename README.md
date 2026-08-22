@@ -58,9 +58,12 @@ flowchart TD
 
 - Docker
 - Bash
+- `sha256sum` (GNU coreutils on Linux; recent macOS ships it in `/sbin`, see below)
 - optional Git
 
 Git is not required. If the current directory is not a Git repository, the wrapper simply uses the current directory as the workspace.
+
+Recent macOS ships `sha256sum` in `/sbin`; older releases only have `shasum`. If `command -v sha256sum` finds nothing, run `brew install coreutils` and add its `gnubin` directory to `PATH`: `export PATH="$(brew --prefix coreutils)/libexec/gnubin:$PATH"` (Homebrew's coreutils installs the command as `gsha256sum` unless that directory is on `PATH`).
 
 ## Installation
 
@@ -150,12 +153,18 @@ leaves your machine; tokscale only reaches the network to refresh model pricing
 opencode-sandbox --usage            # tokens + cost for the current workspace
 opencode-sandbox --usage --all      # aggregate across all workspaces
 opencode-sandbox --usage --json     # machine-readable output
-opencode-sandbox --usage --today    # any extra flag is forwarded to tokscale
+opencode-sandbox --usage --today    # extra tokscale flags are forwarded
 ```
 
-`--usage` defaults to a readable table. Any flag you pass after `--usage` (for
-example `--json`, `--today`, `--week`, `--group-by session,model`) is forwarded
-straight to tokscale.
+`--usage` defaults to a readable table. Any flag you pass after `--usage` that
+the wrapper does not itself recognize (for example `--json`, `--today`,
+`--week`, `--group-by session,model`) is forwarded straight to tokscale.
+Flags the wrapper reserves for itself (`--usage`, `--offline`, `--pull`,
+`--print`, `--init-structure`, `--all`, `--no-usage`, `--version`,
+`--help`/`-h`) are still consumed by the wrapper even after `--usage`
+(`--all` means "aggregate across workspaces" in the wrapper itself; a second
+`--usage` is simply consumed again); use `--` after `--usage` to force
+everything that follows through to tokscale unchanged.
 
 After a normal run the wrapper prints a one-line summary of today's usage for
 the workspace, for example:
@@ -240,6 +249,10 @@ opencode-sandbox --pull
 The Compose file is intended as a simple reference. The preferred path is currently the `opencode-sandbox` wrapper, because it uses the current working directory directly as the workspace.
 
 If you want to use Compose, place your project under `./workspace` or adjust the volume mount.
+
+Unlike the wrapper, the Compose file mounts the shared `${HOME}/.opencode-home` directory as container HOME, without per-workspace isolation: every project run through Compose shares the same auth tokens and session history. Point the volume at a per-project subdirectory if you need the isolation the wrapper provides.
+
+Running Compose writes state directly into `~/.opencode-home/` (not into a per-workspace subdirectory), so a later `opencode-sandbox` run in that same home prints its legacy-layout warning, unless that workspace's own state dir already exists.
 
 ## Project docs
 

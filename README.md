@@ -17,7 +17,7 @@ flowchart TD
     subgraph startup ["Startup"]
         A["parse options<br/>opencode-sandbox"]
         B["resolve workspace root<br/>git rev-parse --show-toplevel / pwd"]
-        C["compute WORKSPACE_SLUG<br/>basename + sha256sum(path)[:8]"]
+        C["compute WORKSPACE_SLUG<br/>basename + sha256(path)[:8]"]
         D[("~/.opencode-home/slug/<br/>HOST_OPENCODE_HOME")]
         A --> B --> C --> D
     end

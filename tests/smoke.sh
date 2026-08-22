@@ -10,6 +10,18 @@ FAKE_BIN="$TEST_TMP/fake-bin"
 TEST_HOME="$TEST_TMP/home"
 DOCKER_LOG="$TEST_TMP/docker.log"
 
+# Print the sha256 hex digest of stdin, using whichever tool is on PATH.
+# Mirrors the wrapper's own sha256_hex() (opencode-sandbox): prefer
+# sha256sum, fall back to `shasum -a 256` when it's absent (e.g. a stock
+# macOS PATH with no coreutils sha256sum installed).
+sha256_hex() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | cut -d' ' -f1
+  else
+    shasum -a 256 | cut -d' ' -f1
+  fi
+}
+
 mkdir -p "$TEST_WORKDIR" "$FAKE_BIN" "$TEST_HOME"
 cp "$ROOT_DIR/opencode-sandbox" "$TEST_WORKDIR/opencode-sandbox"
 cp "$ROOT_DIR/PROJECT.md" "$TEST_WORKDIR/PROJECT.md"
@@ -114,7 +126,7 @@ workspace_slug() {
   name="${name#-}"
   name="${name%-}"
   [[ -z "$name" ]] && name="workspace"
-  printf '%s-%s' "$name" "$(printf '%s' "$workdir" | sha256sum | cut -c1-8)"
+  printf '%s-%s' "$name" "$(printf '%s' "$workdir" | sha256_hex | cut -c1-8)"
 }
 
 TEST_SLUG="$(workspace_slug "$TEST_WORKDIR")"
@@ -431,12 +443,14 @@ assert_not_contains "$(cat "$DOCKER_LOG")" "XDG_CACHE_HOME=/tmp/tscache"
 # docker-not-installed guard (opencode-sandbox:286). run_wrapper always prepends
 # a fake `docker` to PATH, so the hard-fail path is otherwise never exercised.
 # Build a PATH that carries the coreutils the wrapper needs before the check
-# (basename, tr, sha256sum, cut) but no docker, and assert the guard aborts with
-# the right message and a non-zero exit. Invoke bash by absolute path so finding
-# the interpreter itself does not depend on the stripped PATH.
+# (basename, tr, sha256sum or shasum, cut) but no docker, and assert the guard
+# aborts with the right message and a non-zero exit. Invoke bash by absolute
+# path so finding the interpreter itself does not depend on the stripped PATH.
+# sha256sum is optional here (absent on a stock macOS PATH); shasum is the
+# fallback the wrapper's sha256_hex() uses, so it must be present too.
 NODOCKER_BIN="$TEST_TMP/nodocker-bin"
 mkdir -p "$NODOCKER_BIN"
-for tool in basename tr sha256sum cut find grep dirname; do
+for tool in basename tr sha256sum shasum cut find grep dirname; do
   tool_path="$(command -v "$tool" 2>/dev/null || true)"
   if [[ -n "$tool_path" ]]; then
     ln -sf "$tool_path" "$NODOCKER_BIN/$tool"
@@ -644,8 +658,18 @@ fi
 # sha256sum/shasum fallback (opencode-sandbox: sha256_hex). The wrapper
 # prefers sha256sum but falls back to `shasum -a 256` when it's absent, and
 # both must fold a fixed input into the identical 8-char slug or workspace
-# state would split across the two tools.
-if command -v shasum >/dev/null 2>&1; then
+# state would split across the two tools. This whole block requires `shasum`
+# on the host (README now declares it a supported fallback, so a missing
+# shasum is a hard failure here, not a silent skip); the sha256sum-vs-shasum
+# equality check further requires `sha256sum` and only runs when both tools
+# are present (e.g. under `PATH=/usr/bin:/bin` on a stock macOS, sha256sum
+# lives in /sbin and is unavailable).
+if ! command -v shasum >/dev/null 2>&1; then
+  printf 'FAIL: shasum not found on PATH; the sha256sum/shasum fallback tests cannot run\n' >&2
+  exit 1
+fi
+FALLBACK_TESTS_SKIPPED=""
+if command -v sha256sum >/dev/null 2>&1; then
   fixed_input="opencode-sandbox-slug-fixture"
   via_sha256sum="$(printf '%s' "$fixed_input" | sha256sum | cut -d' ' -f1 | cut -c1-8)"
   via_shasum="$(printf '%s' "$fixed_input" | shasum -a 256 | cut -d' ' -f1 | cut -c1-8)"
@@ -654,38 +678,68 @@ if command -v shasum >/dev/null 2>&1; then
       "$via_sha256sum" "$via_shasum" >&2
     exit 1
   fi
-
-  # Hide sha256sum from PATH (a stock PATH minus sha256sum, plus shasum) and
-  # confirm --version and a workspace-slug computation (--print) both still
-  # work, taking the shasum fallback branch of sha256_hex().
-  NOSHA_BIN="$TEST_TMP/nosha-bin"
-  mkdir -p "$NOSHA_BIN"
-  for tool in basename tr cut find grep dirname shasum; do
-    tool_path="$(command -v "$tool" 2>/dev/null || true)"
-    if [[ -n "$tool_path" ]]; then
-      ln -sf "$tool_path" "$NOSHA_BIN/$tool"
-    fi
-  done
-  ln -sf "$FAKE_BIN/docker" "$NOSHA_BIN/docker"
-  if [[ -e "$NOSHA_BIN/sha256sum" ]]; then
-    printf 'sha256sum leaked into the no-sha256sum PATH fixture\n' >&2
-    exit 1
-  fi
-
-  nosha_version_output="$(
-    cd "$TEST_WORKDIR"
-    HOME="$TEST_HOME" PATH="$NOSHA_BIN" "$BASH_BIN" ./opencode-sandbox --version 2>&1
-  )"
-  assert_contains "$nosha_version_output" "opencode-sandbox 0.2.2"
-
-  nosha_print_output="$(
-    cd "$TEST_WORKDIR"
-    HOME="$TEST_HOME" PATH="$NOSHA_BIN" "$BASH_BIN" ./opencode-sandbox --print 2>&1
-  )"
-  assert_contains "$nosha_print_output" "--name opencode-$TEST_SLUG"
-  assert_contains "$nosha_print_output" "-v $TEST_HOME/.opencode-home/$TEST_SLUG:/opencode-home"
 else
-  printf 'skipping shasum-fallback tests: shasum not found on PATH\n' >&2
+  FALLBACK_TESTS_SKIPPED="sha256sum-vs-shasum digest equality check (sha256sum not on PATH)"
+  printf 'skipping sha256sum-vs-shasum digest equality check: sha256sum not found on PATH\n' >&2
 fi
 
-printf 'smoke tests: ok\n'
+# Hide sha256sum from PATH (a stock PATH minus sha256sum, plus shasum) and
+# confirm --version and a workspace-slug computation (--print) both still
+# work, taking the shasum fallback branch of sha256_hex(). The --print
+# assertions below are the load-bearing half of this test: --version exits
+# before the wrapper ever computes WORKSPACE_SLUG, so it alone would not
+# catch a broken fallback in sha256_hex().
+NOSHA_BIN="$TEST_TMP/nosha-bin"
+mkdir -p "$NOSHA_BIN"
+for tool in basename tr cut find grep dirname shasum; do
+  tool_path="$(command -v "$tool" 2>/dev/null || true)"
+  if [[ -n "$tool_path" ]]; then
+    ln -sf "$tool_path" "$NOSHA_BIN/$tool"
+  fi
+done
+ln -sf "$FAKE_BIN/docker" "$NOSHA_BIN/docker"
+if [[ -e "$NOSHA_BIN/sha256sum" ]]; then
+  printf 'sha256sum leaked into the no-sha256sum PATH fixture\n' >&2
+  exit 1
+fi
+
+nosha_version_output="$(
+  cd "$TEST_WORKDIR"
+  HOME="$TEST_HOME" PATH="$NOSHA_BIN" "$BASH_BIN" ./opencode-sandbox --version 2>&1
+)"
+assert_contains "$nosha_version_output" "opencode-sandbox 0.2.2"
+
+nosha_print_output="$(
+  cd "$TEST_WORKDIR"
+  HOME="$TEST_HOME" PATH="$NOSHA_BIN" "$BASH_BIN" ./opencode-sandbox --print 2>&1
+)"
+assert_contains "$nosha_print_output" "--name opencode-$TEST_SLUG"
+assert_contains "$nosha_print_output" "-v $TEST_HOME/.opencode-home/$TEST_SLUG:/opencode-home"
+
+# Neither tool on PATH (opencode-sandbox: sha256_hex). --print reaches
+# WORKSPACE_SLUG (which calls sha256_hex), so it must fail with the
+# dedicated error message rather than an unrelated "command not found".
+NOSHA_NOTOOL_BIN="$TEST_TMP/nosha-notool-bin"
+mkdir -p "$NOSHA_NOTOOL_BIN"
+for tool in basename tr cut find grep dirname; do
+  tool_path="$(command -v "$tool" 2>/dev/null || true)"
+  if [[ -n "$tool_path" ]]; then
+    ln -sf "$tool_path" "$NOSHA_NOTOOL_BIN/$tool"
+  fi
+done
+ln -sf "$FAKE_BIN/docker" "$NOSHA_NOTOOL_BIN/docker"
+notool_stderr="$TEST_TMP/notool.stderr"
+if (
+  cd "$TEST_WORKDIR"
+  HOME="$TEST_HOME" PATH="$NOSHA_NOTOOL_BIN" "$BASH_BIN" ./opencode-sandbox --print
+) >/dev/null 2>"$notool_stderr"; then
+  printf 'Expected the wrapper to fail when neither sha256sum nor shasum is on PATH\n' >&2
+  exit 1
+fi
+assert_contains "$(cat "$notool_stderr")" "[opencode-sandbox][error] Neither sha256sum nor shasum found in PATH."
+
+if [[ -n "$FALLBACK_TESTS_SKIPPED" ]]; then
+  printf 'smoke tests: ok (skipped: %s)\n' "$FALLBACK_TESTS_SKIPPED"
+else
+  printf 'smoke tests: ok\n'
+fi

@@ -4,8 +4,12 @@ All notable changes to this project should be documented in this file.
 
 ## Unreleased
 
+### Fixed
+- The wrapper's workspace-slug hashing now falls back to `shasum -a 256` when `sha256sum` is absent from PATH (stock older macOS ships only `shasum`), so the coreutils `sha256sum` requirement documented in 0.2.2 is dropped. A host with neither tool now gets a clear `[opencode-sandbox][error] Neither sha256sum nor shasum found in PATH.` instead of an unrelated failure.
+
 ### Tests
 - Closed the four coverage gaps from the 2026-06-27 audit in `tests/smoke.sh`: the docker-not-installed guard, `install.sh`'s `detect_shell_rc` zsh branch and PATH-already-present branch, `install.sh`'s unknown-option / `--help` / missing-source error paths, and the `print_usage_after_run` JSON parsing (compact vs pretty extraction, the `-0.0` sign strip, and the empty-output fallback). Each is mutation-checked. No production behavior change.
+- `tests/smoke.sh` itself now works on a `sha256sum`-less PATH: its own slug helper and the docker-guard PATH fixture support the `shasum` fallback, and new tests cover the fallback equality, the shasum-only PATH, and the neither-tool error path.
 
 ## [0.2.2] - 2026-06-09
 

@@ -41,7 +41,7 @@ Please keep pull requests focused. A good PR usually includes:
 - a short problem statement
 - the behavioral change
 - any compatibility or migration notes
-- README updates when the user-facing behavior changes
+- README.md or docs/ updates when the user-facing behavior changes
 
 ## Reporting issues
 

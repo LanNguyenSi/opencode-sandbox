@@ -12,8 +12,9 @@ This version is intentionally focused on a stable core: the TUI starts reliably,
 - forwards unknown arguments straight to OpenCode (`auth login`, `run "..."`, `/init`, ...)
 - reports token usage and cost via `--usage`, and after a normal run
   (default image; opt out with `--no-usage`)
-- `--offline` disables networking for the OpenCode container (add `--no-usage`
-  to skip the networked usage summary too); `--print` is a dry run
+- `--offline` disables networking for the OpenCode container only (usage
+  reporting and image builds still use the network, see
+  [docs/architecture.md](docs/architecture.md#container-boundaries)); `--print` is a dry run
 
 ## Requirements
 

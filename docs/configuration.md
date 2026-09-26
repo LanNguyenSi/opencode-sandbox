@@ -25,6 +25,8 @@ Wrapper options:
   --help              Show this help
 ```
 
+Note: `--offline` applies to the OpenCode container only; see [Container boundaries](architecture.md#container-boundaries).
+
 Anything after `--` (or any argument the wrapper does not itself recognize) is forwarded to OpenCode, for example `opencode-sandbox auth login` or `opencode-sandbox run "..."`.
 
 ## `--print`

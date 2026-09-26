@@ -1,0 +1,66 @@
+# Architecture
+
+How `opencode-sandbox` resolves a workspace, builds its image, and runs OpenCode in a container.
+
+## Flow
+
+A single invocation resolves the workspace, ensures the local Docker image exists, runs OpenCode in an isolated container, and prints a token-usage summary on exit.
+
+```mermaid
+flowchart TD
+    subgraph startup ["Startup"]
+        A["parse options<br/>opencode-sandbox"]
+        B["resolve workspace root<br/>git rev-parse --show-toplevel / pwd"]
+        C["compute WORKSPACE_SLUG<br/>basename + sha256(path)[:8]"]
+        D[("~/.opencode-home/slug/<br/>HOST_OPENCODE_HOME")]
+        A --> B --> C --> D
+    end
+
+    subgraph image ["Image"]
+        E{"local image present?<br/>docker image inspect"}
+        F["build_local_image()<br/>opencode-sandbox"]
+        G[("embedded Dockerfile<br/>ubuntu:24.04, opencode.ai/install<br/>bun, tokscale@3.0.0")]
+        E -- no --> F --> G
+    end
+
+    subgraph container ["Container run"]
+        H["docker run<br/>-v workspace:/workspace<br/>-v state:/opencode-home -e HOME=/opencode-home"]
+        I["OpenCode<br/>TUI / run / auth / passthrough"]
+        H --> I
+    end
+
+    subgraph postrun ["Post-run"]
+        J["print_usage_after_run()<br/>opencode-sandbox"]
+        K[("opencode.db<br/>.local/share/opencode/opencode.db")]
+        L["one-line usage summary<br/>stderr"]
+        J --> K --> L
+    end
+
+    D --> E
+    E -- yes --> H
+    G --> H
+    I --> J
+```
+
+## Workspace resolution
+
+If the current directory is inside a Git repository, the wrapper uses `git rev-parse --show-toplevel` as the workspace root; otherwise it uses the current directory. Git is optional: a non-Git directory works the same way, just without that auto-detection step.
+
+## Per-workspace state and isolation
+
+OpenCode state (auth tokens, session history) lives on the host under `~/.opencode-home/<slug>/`, where `<slug>` is the workspace directory's basename followed by a short hash of its absolute path (`opencode-sandbox`'s `sha256_hex()` / `WORKSPACE_SLUG`). That directory is mounted as the container's `HOME`.
+
+This is the wrapper's isolation boundary between projects: two different directories that happen to share a basename (for example `~/work/api` and `~/play/api`) get distinct state dirs because the slug includes a hash of the full path, so their auth tokens and session history never mix. The basename alone would not be enough to prevent that collision, which is why the hash is there (see `docs/troubleshooting.md` for the pre-hash legacy layout).
+
+## Container boundaries
+
+- The current workspace is mounted read-write at `/workspace`; the container has no access to the rest of the host filesystem beyond that mount and the per-workspace state directory.
+- `--offline` runs the container with `--network none`, fully disabling container networking.
+- The default image is built locally from the embedded Dockerfile (Ubuntu 24.04, the official `opencode.ai/install` script, plus bun and `tokscale@3.0.0`); nothing is pulled from a third-party registry unless `OPENCODE_IMAGE` is set.
+- The wrapper does not expose the Docker socket into the container, so OpenCode running inside it cannot itself launch further containers on the host.
+
+These are the same properties documented informally in the flow above; nothing here changes wrapper behavior, it only names the boundary explicitly.
+
+## Why a local Ubuntu (glibc) image
+
+The upstream `ghcr.io/anomalyco/opencode` image is Alpine (musl), but OpenCode bundles a glibc-linked OpenTUI render library. On that image the TUI fails to initialize with `Error loading shared library ld-linux-x86-64.so.2` and the process hangs with a blank terminal. Building locally from `ubuntu:24.04` avoids it. See [anomalyco/opencode#28070](https://github.com/anomalyco/opencode/issues/28070).

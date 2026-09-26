@@ -44,7 +44,7 @@ outputs/     reports, analyses, drafts
 
 ## Image selection
 
-By default the wrapper builds and uses a local image, `opencode-sandbox:local`, from the embedded Dockerfile. The build runs automatically on the first launch and takes roughly 3-5 minutes; see `docs/architecture.md` for why it is a local Ubuntu build rather than the upstream image.
+By default the wrapper builds and uses a local image, `opencode-sandbox:local`, from the embedded Dockerfile. The build runs automatically on the first launch and takes roughly 3-5 minutes; see [Architecture](architecture.md) for why it is a local Ubuntu build rather than the upstream image.
 
 Override with an explicit registry image:
 
@@ -58,7 +58,7 @@ OPENCODE_IMAGE=ghcr.io/anomalyco/opencode:<tag> opencode-sandbox
 
 | Variable | Effect |
 | --- | --- |
-| `OPENCODE_IMAGE` | Use this image instead of building/using the local default; disables usage reporting. |
+| `OPENCODE_IMAGE` | Use this image instead of building/using the local default; skips the post-run usage summary, and `--usage` may not find `tokscale`. |
 | `OPENCODE_NO_USAGE` | Set (non-empty) to disable the post-run usage summary; same as `--no-usage`. |
 
 ## Token usage tracking
@@ -72,7 +72,7 @@ opencode-sandbox --usage --json     # machine-readable output
 opencode-sandbox --usage --today    # extra tokscale flags are forwarded
 ```
 
-`--usage` defaults to a readable table. Any flag after `--usage` that the wrapper does not itself recognize (for example `--json`, `--today`, `--week`, `--group-by session,model`) is forwarded straight to tokscale. Flags the wrapper reserves for itself (`--usage`, `--offline`, `--pull`, `--print`, `--init-structure`, `--all`, `--no-usage`, `--version`, `--help`/`-h`) are still consumed by the wrapper even after `--usage`; use `--` after `--usage` to force everything that follows through to tokscale unchanged.
+`--usage` defaults to a readable table. Any flag after `--usage` that the wrapper does not itself recognize (for example `--json`, `--today`, `--week`, `--group-by session,model`) is forwarded straight to tokscale. Flags the wrapper reserves for itself (`--usage`, `--offline`, `--pull`, `--print`, `--init-structure`, `--all`, `--no-usage`, `--version`, `--help`/`-h`) are still consumed by the wrapper even after `--usage` (`--all` means "aggregate across workspaces" in the wrapper itself, and a second `--usage` is simply consumed again); use `--` after `--usage` to force everything that follows through to tokscale unchanged.
 
 After a normal run the wrapper prints a one-line summary of today's usage for the workspace, for example:
 
@@ -93,4 +93,4 @@ The Compose file is a simple reference; the preferred path is the `opencode-sand
 
 Unlike the wrapper, the Compose file mounts the shared `${HOME}/.opencode-home` directory as container `HOME`, without per-workspace isolation: every project run through Compose shares the same auth tokens and session history. Point the volume at a per-project subdirectory if you need the isolation the wrapper provides.
 
-Running Compose writes state directly into `~/.opencode-home/` (not into a per-workspace subdirectory), so a later `opencode-sandbox` run against that same home prints its legacy-layout warning, unless that workspace's own state dir already exists (see `docs/troubleshooting.md`).
+Running Compose writes state directly into `~/.opencode-home/` (not into a per-workspace subdirectory), so a later `opencode-sandbox` run against that same home prints its legacy-layout warning, unless that workspace's own state dir already exists (see [Troubleshooting](troubleshooting.md)).

@@ -10,7 +10,8 @@ This version is intentionally focused on a stable core: the TUI starts reliably,
 - builds and reuses a local Docker image so the TUI works out of the box (see `docs/architecture.md` for why)
 - isolates OpenCode state (auth, session history) per workspace under `~/.opencode-home/<slug>/`
 - forwards unknown arguments straight to OpenCode (`auth login`, `run "..."`, `/init`, ...)
-- reports token usage and cost via `--usage`, and after every normal run
+- reports token usage and cost via `--usage`, and after a normal run
+  (default image; opt out with `--no-usage`)
 - `--offline` disables container networking; `--print` is a dry run
 
 ## Requirements

@@ -48,18 +48,18 @@ If the current directory is inside a Git repository, the wrapper uses `git rev-p
 
 ## Per-workspace state and isolation
 
-OpenCode state (auth tokens, session history) lives on the host under `~/.opencode-home/<slug>/`, where `<slug>` is the workspace directory's basename followed by a short hash of its absolute path (`opencode-sandbox`'s `sha256_hex()` / `WORKSPACE_SLUG`). That directory is mounted as the container's `HOME`.
+OpenCode state (auth tokens, session history) lives on the host under `~/.opencode-home/<slug>/`, where `<slug>` is the workspace directory's basename followed by a short hash of its absolute path (`opencode-sandbox`'s `sha256_hex()` / `WORKSPACE_SLUG`). Only the basename is human-readable; the full path is not encoded. That directory is mounted as the container's `HOME`.
 
-This is the wrapper's isolation boundary between projects: two different directories that happen to share a basename (for example `~/work/api` and `~/play/api`) get distinct state dirs because the slug includes a hash of the full path, so their auth tokens and session history never mix. The basename alone would not be enough to prevent that collision, which is why the hash is there (see `docs/troubleshooting.md` for the pre-hash legacy layout).
+This is the wrapper's isolation boundary between projects: two different directories that happen to share a basename (for example `~/work/api` and `~/play/api`) get distinct state dirs because the slug includes a hash of the full path, so their auth tokens and session history never mix. The basename alone would not be enough to prevent that collision, which is why the hash is there (see [Troubleshooting](troubleshooting.md) for the pre-hash legacy layout).
 
 ## Container boundaries
 
 - The current workspace is mounted read-write at `/workspace`; the container has no access to the rest of the host filesystem beyond that mount and the per-workspace state directory.
 - `--offline` runs the container with `--network none`, fully disabling container networking.
-- The default image is built locally from the embedded Dockerfile (Ubuntu 24.04, the official `opencode.ai/install` script, plus bun and `tokscale@3.0.0`); nothing is pulled from a third-party registry unless `OPENCODE_IMAGE` is set.
+- The default image is built locally from the embedded Dockerfile, but the build itself reaches external sources: it pulls `ubuntu:24.04` from Docker Hub, pipes the upstream `opencode.ai/install` and `bun.sh/install` scripts (not version-pinned) into `bash`, and installs `tokscale@3.0.0` from the npm registry. `--pull` rebuilds with `docker build --pull --no-cache`. Setting `OPENCODE_IMAGE` replaces all of this with the named registry image.
 - The wrapper does not expose the Docker socket into the container, so OpenCode running inside it cannot itself launch further containers on the host.
 
-These are the same properties documented informally in the flow above; nothing here changes wrapper behavior, it only names the boundary explicitly.
+`--usage --all` additionally mounts the whole `~/.opencode-home` read-only so usage can be aggregated across workspaces.
 
 ## Why a local Ubuntu (glibc) image
 

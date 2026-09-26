@@ -18,7 +18,7 @@ Pre-v0.1.0, all workspaces shared a single `~/.opencode-home/` directory. On fir
 
 ## Workspace slug changed after upgrading
 
-Earlier releases keyed state on the workspace basename alone, which let two directories that share a basename collide on the same state dir. The slug now appends a short hash of the absolute path (see `docs/architecture.md`). State created by an older version stays under the old basename-only directory (`~/.opencode-home/<basename>/`) and is not migrated automatically: the first run after upgrading starts a fresh state dir. Move anything you want to keep (auth, session history) from the old directory into the new one, then remove the old directory.
+Earlier releases keyed state on the workspace basename alone, which let two directories that share a basename collide on the same state dir. The slug now appends a short hash of the absolute path (see [Architecture](architecture.md)). State created by an older version stays under the old basename-only directory (`~/.opencode-home/<basename>/`) and is not migrated automatically: the first run after upgrading starts a fresh state dir. Move anything you want to keep (auth, session history) from the old directory into the new one, then remove the old directory.
 
 ## Resetting local state
 

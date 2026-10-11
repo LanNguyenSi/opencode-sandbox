@@ -6,7 +6,7 @@ How `opencode-sandbox` resolves a workspace, builds its image, and runs OpenCode
 
 A single invocation resolves the workspace, ensures the image exists, runs OpenCode in an isolated container, and, with the default image and auto-usage on, prints a token-usage summary on exit. `--usage` and `--print` exit early.
 
-The first diagram shows startup and the two early exits; the second continues from the state directory through image acquisition and the run.
+The first diagram shows startup and the early exits (missing Docker, `--pull` combined with `--offline`, `--usage`, `--print`); `--help` and `--version` (during option parsing) and a missing `sha256sum`/`shasum` (while computing the slug) also exit early and are not drawn. The second continues from the state directory through image acquisition and the run.
 
 ```mermaid
 flowchart TD
@@ -14,7 +14,9 @@ flowchart TD
     B --> C["WORKSPACE_SLUG<br/>HOST_OPENCODE_HOME = ~/.opencode-home/slug"]
     C --> D{"docker on PATH?"}
     D -- no --> D1["error, exit 1"]
-    D -- yes --> U{"--usage?"}
+    D -- yes --> OP{"--offline with --pull?"}
+    OP -- yes --> OP1["error, exit 1"]
+    OP -- no --> U{"--usage?"}
     U -- yes --> UM["run_usage_mode()<br/>tokscale container, state :ro"]
     U -- no --> P{"--print?"}
     P -- yes --> PO["print docker command(s), exit 0"]
@@ -33,7 +35,7 @@ flowchart TD
     F2 --> AU
     F3 --> AU
     AU -- yes --> H["docker run OpenCode<br/>capture exit code"]
-    H --> J["print_usage_after_run()<br/>second tokscale container, state :ro"]
+    H --> J["print_usage_after_run()<br/>if opencode.db exists: second tokscale container, state :ro"]
     J --> R["exit with OpenCode's code"]
     AU -- no --> X["exec docker run OpenCode<br/>(no summary)"]
 ```
@@ -44,7 +46,7 @@ If the current directory is inside a Git repository, the wrapper uses `git rev-p
 
 ## Per-workspace state and isolation
 
-OpenCode state (auth tokens, session history) lives on the host under `~/.opencode-home/<slug>/`, where `<slug>` is the workspace directory's basename, lowercased, with each run of characters outside `a-z0-9_.-` replaced by a single `-` and any leading or trailing `-` removed (`workspace` if nothing is left), followed by `-` and the first 8 hex characters of the SHA-256 of its absolute path (`opencode-sandbox`'s `sha256_hex()` / `WORKSPACE_SLUG`). Only the basename is human-readable; the full path is not encoded. That directory is mounted as the container's `HOME`.
+OpenCode state (auth tokens, session history) lives on the host under `~/.opencode-home/<slug>/`, where `<slug>` is the workspace directory's basename, lowercased, with each run of characters outside `a-z0-9_.-` replaced by a single `-`, consecutive `-` collapsed to one, and any leading or trailing `-` removed (`workspace` if nothing is left), followed by `-` and the first 8 hex characters of the SHA-256 of its absolute path (`opencode-sandbox`'s `sha256_hex()` / `WORKSPACE_SLUG`). Only the basename is human-readable; the full path is not encoded. That directory is mounted as the container's `HOME`.
 
 This is the wrapper's isolation boundary between projects: two different directories that happen to share a basename (for example `~/work/api` and `~/play/api`) get distinct state dirs because the slug includes a hash of the full path, so their auth tokens and session history never mix. The basename alone would not be enough to prevent that collision, which is why the hash is there (see [Troubleshooting](troubleshooting.md) for the pre-hash legacy layout).
 

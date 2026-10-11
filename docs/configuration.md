@@ -95,7 +95,7 @@ Notes and limitations:
 
 The Compose file is a simple reference; the preferred path is the `opencode-sandbox` wrapper, because it uses the current working directory directly as the workspace. To use Compose, place your project under `./workspace` or adjust the volume mount.
 
-The service runs `${OPENCODE_IMAGE:-opencode-sandbox:local}` and can build it from the top-level `Dockerfile` with `docker compose build`, which produces the same image as the wrapper's embedded Dockerfile; setting `OPENCODE_IMAGE` during a build tags the local build under that name. It sets `TERM` to `xterm-256color` rather than forwarding the host value.
+The service runs `${OPENCODE_IMAGE:-opencode-sandbox:local}` and can build it from the top-level `Dockerfile` with `docker compose build`, which builds from the same instructions as the wrapper's embedded Dockerfile; setting `OPENCODE_IMAGE` during a build tags the local build under that name. It sets `TERM` to `xterm-256color` rather than forwarding the host value.
 
 Unlike the wrapper, the Compose file mounts the shared `${HOME}/.opencode-home` directory as container `HOME`, without per-workspace isolation: every project run through Compose shares the same auth tokens and session history. Point the volume at a per-project subdirectory if you need the isolation the wrapper provides.
 

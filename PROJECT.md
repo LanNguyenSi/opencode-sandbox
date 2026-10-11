@@ -13,8 +13,12 @@
 
 - `opencode-sandbox`: main wrapper script
 - `install.sh`: local installer for `~/.local/bin`
+- `Dockerfile`: standalone image definition, kept identical to the wrapper's embedded copy
 - `docker-compose.yml`: reference Compose setup
 - `README.md`: usage and project overview
+- `docs/`: architecture, configuration and troubleshooting
+- `tests/smoke.sh`: smoke tests
+- `Makefile`: test, check and install targets
 
 ## Change guidelines
 

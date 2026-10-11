@@ -27,7 +27,7 @@ Wrapper options:
 
 Note: `--offline` applies to the OpenCode container only; see [Container boundaries](architecture.md#container-boundaries).
 
-Anything after `--` (or any argument the wrapper does not itself recognize) is forwarded to OpenCode, for example `opencode-sandbox auth login` or `opencode-sandbox run "..."`.
+Anything after `--` (or any argument the wrapper does not itself recognize) is forwarded to OpenCode, for example `opencode-sandbox auth login` or `opencode-sandbox run "..."`. The wrapper recognizes its own options anywhere before a `--`, so `opencode-sandbox run --help` shows the wrapper's help and `--version` prints the wrapper's version. Put an OpenCode flag that shares a name with a wrapper option after `--`, for example `opencode-sandbox -- --version` or `opencode-sandbox -- run --help`.
 
 ## `--print`
 
@@ -63,9 +63,11 @@ OPENCODE_IMAGE=ghcr.io/anomalyco/opencode:<tag> opencode-sandbox
 | `OPENCODE_IMAGE` | Use this image instead of building/using the local default; skips the post-run usage summary, and `--usage` may not find `tokscale`. |
 | `OPENCODE_NO_USAGE` | Set (non-empty) to disable the post-run usage summary; same as `--no-usage`. |
 
+The wrapper passes the OpenCode container only `HOME=/opencode-home` and `TERM` (the host value, or `xterm-256color` when unset). Other host environment variables, including provider API keys exported in your shell, are not forwarded, and the wrapper has no option to add them. Authenticate inside the sandbox with `opencode-sandbox auth login`; credentials are stored in the per-workspace state directory.
+
 ## Token usage tracking
 
-`--usage` reports tokens and cost for the current workspace via [tokscale](https://github.com/junhoyeo/tokscale) (pinned to `tokscale@3.0.0`, baked into the default image), reading OpenCode's per-workspace SQLite store directly. No data leaves the machine; tokscale only reaches the network to refresh model pricing (cached locally for an hour).
+`--usage` reports tokens and cost for the current workspace via [tokscale](https://github.com/junhoyeo/tokscale) (pinned to `tokscale@3.0.0`, baked into the default image), reading OpenCode's per-workspace SQLite store directly. tokscale reaches the network to fetch model pricing. The wrapper runs it in a throwaway container with no persistent cache, so pricing is not cached between runs: each `--usage` call and each post-run summary can fetch it again.
 
 ```bash
 opencode-sandbox --usage            # tokens + cost for the current workspace
@@ -92,6 +94,8 @@ Notes and limitations:
 ## `docker-compose.yml`
 
 The Compose file is a simple reference; the preferred path is the `opencode-sandbox` wrapper, because it uses the current working directory directly as the workspace. To use Compose, place your project under `./workspace` or adjust the volume mount.
+
+The service runs `${OPENCODE_IMAGE:-opencode-sandbox:local}` and can build it from the top-level `Dockerfile` with `docker compose build`, which builds from the same instructions as the wrapper's embedded Dockerfile; setting `OPENCODE_IMAGE` during a build tags the local build under that name. It sets `TERM` to `xterm-256color` rather than forwarding the host value.
 
 Unlike the wrapper, the Compose file mounts the shared `${HOME}/.opencode-home` directory as container `HOME`, without per-workspace isolation: every project run through Compose shares the same auth tokens and session history. Point the volume at a per-project subdirectory if you need the isolation the wrapper provides.
 

@@ -27,12 +27,22 @@ make test
 make check
 ```
 
+CI also runs `bash -n` and `shellcheck --shell=bash ./opencode-sandbox ./install.sh ./tests/smoke.sh`; run them locally if shellcheck is installed.
+
+The Dockerfile exists twice: the standalone `Dockerfile` and the heredoc in `opencode-sandbox`. Change both; `make test` fails if their non-comment lines differ.
+
 When changing wrapper behavior:
 
 - keep argument parsing simple
 - prefer explicit shell-safe quoting
 - avoid adding side effects to `--print`
 - preserve non-Git workspace support
+
+## Releasing (maintainers)
+
+- bump `VERSION` in `opencode-sandbox` and both version assertions in `tests/smoke.sh`
+- add a `## [X.Y.Z]` section to `CHANGELOG.md`; the release notes are taken from it
+- push a `vX.Y.Z` tag, which runs CI and creates the GitHub release
 
 ## Pull requests
 

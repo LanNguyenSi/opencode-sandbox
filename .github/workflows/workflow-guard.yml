@@ -1,0 +1,16 @@
+name: workflow-guard
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-guard:
+    permissions:
+      contents: read
+    uses: LanNguyenSi/agent-dx/.github/workflows/workflow-guard.yml@28744775c941e6f5ffbe49799ebd37c5e39c2704

@@ -2,7 +2,9 @@
 
 All notable changes to this project should be documented in this file.
 
-## Unreleased
+## [Unreleased]
+
+## [0.2.3] - 2026-10-25
 
 ### Fixed
 - The wrapper's workspace-slug hashing now falls back to `shasum -a 256` when `sha256sum` is absent from PATH (stock older macOS ships only `shasum`), so the coreutils `sha256sum` requirement documented in 0.2.2 is dropped. A host with neither tool now gets a clear `[opencode-sandbox][error] Neither sha256sum nor shasum found in PATH.` instead of an unrelated failure.
